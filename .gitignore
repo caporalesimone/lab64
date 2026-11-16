@@ -1,0 +1,7 @@
+# Lab64 (14/11).
+# Generated files: out/ (vc64web pages built by build-images.sh) and downloads/ (sources, build-images.sh), never in git
+out/
+__pycache__/
+*.pyc
+downloads/
+.ruff_cache/

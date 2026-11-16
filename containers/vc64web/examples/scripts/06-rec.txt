@@ -1,0 +1,8 @@
+# Records the script inputs as a new text script (session.txt in --outdir).
+wait "READY." 10s
+rec start session
+0 L
+10 O
+20 A
+wait 30
+rec stop

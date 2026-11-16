@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C64 live</title>
+<!-- Live viewer screen (KasmVNC web client) with audio (13/11). Copyright (c) 2026 - Simone Caporale
+     The audio comes from /audio (WebSocket, PCM s16le stereo 44100 Hz) and is played with WebAudio with a small margin (~30 ms).
+     The browser turns the audio on only after a click: "Audio" button. -->
+<style>
+  /* (14/11) header with the control center theme: dark bar, rainbow, key-shaped buttons */
+  :root { --bar:#14121c; --fg:#f0e6c8; --acc:#f2c230; --dim:#c9bd9c; --key:#fffaf0; --ink:#2a2118; }
+  html, body { margin:0; height:100%; background:#000; color:var(--fg); font:14px/1.4 system-ui, sans-serif; }
+  body { display:flex; flex-direction:column; }
+  header { display:flex; gap:12px; align-items:center; padding:6px 12px; background:var(--bar); flex-wrap:wrap; }
+  header { border-bottom:10px solid; border-image:linear-gradient(#c8301e 0 20%, #e8762b 20% 40%, #f2c230 40% 60%, #4f9d45 60% 80%, #2f6db5 80%) 1; }
+  header a { color:var(--acc); text-decoration:none; font:600 13px "DejaVu Sans Mono", ui-monospace, monospace; }
+  button { font:600 13px "DejaVu Sans Mono", ui-monospace, monospace; padding:3px 11px 2px; border-radius:6px; border:1.5px solid var(--ink);
+           background:var(--key); color:var(--ink); cursor:pointer; box-shadow:0 3px 0 #000; margin-bottom:3px; }
+  button:active { transform:translateY(3px); box-shadow:none; }
+  button.on { background:#f2c230; }
+  #st { color:var(--dim); }
+  .vol { display:flex; align-items:center; gap:6px; color:var(--fg); font:600 13px "DejaVu Sans Mono", ui-monospace, monospace; }
+  .vol input { width:110px; accent-color:#f2c230; }
+  .vol output { min-width:4.5ch; color:var(--acc); }
+  iframe { flex:1; border:0; width:100%; }
+
+  /* overlay (14/11): C64 keyboard and joysticks over the screen, semi-transparent */
+  #ov { position:fixed; inset:0; pointer-events:none; z-index:10; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; touch-action:none; }
+  #kb { position:fixed; left:50%; bottom:8px; transform:translateX(-50%); width:min(96vw, 1040px); display:none; gap:1.2%; pointer-events:none; opacity:.82; }
+  #kb.show { display:flex; }
+  #kb .main { flex:16; display:flex; flex-direction:column; gap:3px; }
+  #kb .row { display:flex; gap:3px; }
+  #kb .fk { flex:1.5; display:flex; flex-direction:column; gap:3px; padding-top:calc(var(--kh) + 3px); }
+  #ov { --kh:clamp(26px, 4.3vw, 42px); }
+  .key { flex:1 1 0; height:var(--kh); box-sizing:border-box; display:flex; flex-direction:column; align-items:center; justify-content:center; line-height:1.05;
+    background:rgba(52,50,62,.62); color:#fff; border:1px solid rgba(255,255,255,.38); border-radius:5px; pointer-events:auto; cursor:pointer; font:600 clamp(9px,1.5vw,14px)/1.05 system-ui,sans-serif; white-space:pre; touch-action:none; }
+  .key small { font-size:.62em; opacity:.8; font-weight:500; }
+  .key.dark { background:rgba(20,20,28,.7); }
+  .key.fn { background:rgba(120,90,50,.62); }
+  .key.down, .key.latched { background:rgba(110,130,255,.85); border-color:#fff; }
+  .key.lock { background:rgba(230,170,60,.85); }
+  .spacer { pointer-events:none; flex:1 1 0; }
+  .joy { position:fixed; bottom:calc(14px + var(--kbh, 0px)); display:none; align-items:center; gap:14px; pointer-events:none; }
+  .joy.show { display:flex; }
+  #j1 { left:16px; } #j2 { right:16px; flex-direction:row-reverse; }
+  .joy .lbl { position:absolute; top:-18px; left:0; right:0; text-align:center; font:600 11px system-ui; color:#fff; opacity:.75; letter-spacing:.08em; }
+  .base { position:relative; width:132px; height:132px; border-radius:50%; background:rgba(255,255,255,.14); border:2px solid rgba(255,255,255,.45); pointer-events:auto; touch-action:none; }
+  .knob { position:absolute; left:50%; top:50%; width:58px; height:58px; margin:-29px 0 0 -29px; border-radius:50%; background:rgba(255,255,255,.38); border:2px solid rgba(255,255,255,.8); pointer-events:none; }
+  .fire { width:72px; height:72px; border-radius:50%; background:rgba(220,60,60,.45); border:2px solid rgba(255,255,255,.7); color:#fff; font:700 12px system-ui; pointer-events:auto; touch-action:none; display:flex; align-items:center; justify-content:center; }
+  .fire.down { background:rgba(255,90,90,.85); }
+</style>
+</head>
+<body>
+<header>
+  <a href="./">&larr; index</a>
+  <button id="audioBtn" title="Turns the screen audio on or off">Audio: off</button>
+  <label class="vol" title="Volume of the screen audio (gain: 0-400%; above 100% it amplifies, loud passages can clip)">Vol
+    <input id="vol" type="range" min="0" max="400" step="5" value="100"><output id="volV">100%</output></label>
+  <button id="kbBtn" title="Commodore 64 keyboard over the screen">Keyboard</button>
+  <button id="j1Btn" title="Joystick 1 over the screen (port 1)">Joy 1</button>
+  <button id="j2Btn" title="Joystick 2 over the screen (port 2: the one most games use)">Joy 2</button>
+  <span id="st"></span>
+</header>
+<iframe src="vnc/index.html?autoconnect=1&amp;view_only=0&amp;resize=remote&amp;show_control_bar=true&amp;clipboard_up=true&amp;clipboard_down=true" allow="clipboard-read; clipboard-write"></iframe>
+<div id="ov"><div id="kb"></div><div class="joy" id="j1"></div><div class="joy" id="j2"></div></div>
+<script>
+let ctx = null, ws = null, next = 0, rest = null, gain = null;
+const btn = document.getElementById('audioBtn'), st = document.getElementById('st');
+// (14/11) volume: one GainNode between the audio blocks and the speakers; the value is remembered in this browser
+const vol = document.getElementById('vol'), volV = document.getElementById('volV');
+try { const v = localStorage.getItem('c64.live.volume'); if (v !== null && !isNaN(+v)) vol.value = v; } catch (e) {}
+function setVol() {
+  volV.textContent = vol.value + '%';
+  if (gain) gain.gain.setTargetAtTime(vol.value / 100, ctx.currentTime, 0.02);   // short ramp: no click
+  try { localStorage.setItem('c64.live.volume', vol.value); } catch (e) {}
+}
+vol.oninput = setVol; setVol();
+function play(data) {
+  let b = new Uint8Array(data);
+  if (rest) { const m = new Uint8Array(rest.length + b.length); m.set(rest); m.set(b, rest.length); b = m; rest = null; }
+  const keep = b.length % 4;                               // 4 bytes = one stereo s16le sample
+  if (keep) { rest = b.slice(b.length - keep); b = b.subarray(0, b.length - keep); }
+  const n = b.length / 4; if (!n) return;
+  const i16 = new Int16Array(b.buffer, b.byteOffset, n * 2);
+  const ab = ctx.createBuffer(2, n, 44100), L = ab.getChannelData(0), R = ab.getChannelData(1);
+  for (let i = 0; i < n; i++) { L[i] = i16[2 * i] / 32768; R[i] = i16[2 * i + 1] / 32768; }
+  const s = ctx.createBufferSource(); s.buffer = ab; s.connect(gain);
+  const now = ctx.currentTime;
+  if (next < now + 0.005 || next > now + 0.25) next = now + 0.03;     // restart or accumulated delay: back to ~30 ms
+  s.start(next); next += ab.duration;
+}
+function on() {
+  ctx = ctx || new AudioContext({ sampleRate: 44100 }); ctx.resume();
+  if (!gain) { gain = ctx.createGain(); gain.gain.value = vol.value / 100; gain.connect(ctx.destination); }
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/audio');
+  ws.binaryType = 'arraybuffer';
+  ws.onmessage = e => play(e.data);
+  ws.onopen = () => { st.textContent = 'audio connected'; };
+  ws.onclose = () => { st.textContent = ws ? 'audio disconnected' : ''; if (ws) off(); };
+  btn.textContent = 'Audio: on'; btn.classList.add('on');
+}
+function off() {
+  const w = ws; ws = null; if (w) w.close();
+  btn.textContent = 'Audio: off'; btn.classList.remove('on');
+}
+btn.onclick = () => (ws ? off() : on());
+window.audio = on;                                         // for automated tests
+
+// ---------- overlay: C64 keyboard and joysticks -> /input (keys injected into Xvnc by server.js)
+let inws = null, inq = [], lastFocus = 0;
+function inSend(c) {
+  if (inws && inws.readyState === 1) inws.send(c); else { inq.push(c); inOpen(); }
+}
+function inOpen() {
+  if (inws && inws.readyState <= 1) return;
+  inws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/input');
+  inws.onopen = () => { for (const c of inq.splice(0)) inws.send(c); };
+  inws.onclose = () => { inws = null; };
+}
+const held = new Map();                                    // keysym -> how many elements hold it down (latched SHIFT and SHIFT LOCK use the same Shift)
+function keyDown(s) { focusVice(); const n = (held.get(s) || 0) + 1; held.set(s, n); if (n === 1) inSend('d ' + s); }
+function keyUp(s) { const n = (held.get(s) || 0) - 1; if (n > 0) { held.set(s, n); return; } held.delete(s); inSend('u ' + s); }
+function focusVice() { const n = Date.now(); if (n - lastFocus > 2500) { lastFocus = n; inSend('f'); } }   // with no window manager the key goes to the window under the pointer
+const KS = { Return:0xff0d, BackSpace:0xff08, Insert:0xff63, Home:0xff50, End:0xff57, Escape:0xff1b, Tab:0xff09, Up:0xff52, Down:0xff54, Left:0xff51, Right:0xff53,
+  ShiftL:0xffe1, ShiftR:0xffe2, CtrlL:0xffe3, PgUp:0xff55, F1:0xffbe, F2:0xffbf, F3:0xffc0, F4:0xffc1, F5:0xffc2, F6:0xffc3, F7:0xffc4, F8:0xffc5 };
+// key: [label, normal keysym, keysym with SHIFT (if different), SHIFT legend, width, kind]  kind: m = latching modifier, l = SHIFT LOCK, f = function key
+const c = ch => ch.charCodeAt(0), K = (l, k, ks, sl, w, ty) => ({ l, k, ks: ks ?? k, sl: sl || '', w: w || 1, ty: ty || '' });
+const L = ch => K(ch, c(ch.toLowerCase()), c(ch));
+const ROWS = [
+  [K('←', KS.End), K('1', c('1'), c('!'), '!'), K('2', c('2'), c('"'), '"'), K('3', c('3'), c('#'), '#'), K('4', c('4'), c('$'), '$'), K('5', c('5'), c('%'), '%'),
+   K('6', c('6'), c('&'), '&'), K('7', c('7'), c("'"), "'"), K('8', c('8'), c('('), '('), K('9', c('9'), c(')'), ')'), K('0', c('0')), K('+', c('+')), K('-', c('-')),
+   K('£', c('\\')), K('CLR\nHOME', KS.Home, KS.Home, '', 1, 'dark'), K('INST\nDEL', KS.BackSpace, KS.Insert, '', 1, 'dark')],
+  [K('CTRL', KS.CtrlL, KS.CtrlL, '', 1.5, 'm'), ...'QWERTYUIOP'.split('').map(L), K('@', c('@')), K('*', c('*')), K('↑', c('^')), K('RESTORE', KS.PgUp, KS.PgUp, '', 1.5, 'dark')],
+  [K('RUN\nSTOP', KS.Escape, KS.Escape, '', 1, 'dark'), K('SHIFT\nLOCK', KS.ShiftL, KS.ShiftL, '', 1, 'l'), ...'ASDFGHJKL'.split('').map(L), K(':', c(':')), K(';', c(';')), K('=', c('=')), K('RETURN', KS.Return, KS.Return, '', 2, 'dark')],
+  [K('C=', KS.Tab, KS.Tab, '', 1, 'm'), K('SHIFT', KS.ShiftL, KS.ShiftL, '', 1.5, 'm'), ...'ZXCVBNM'.split('').map(L), K(',', c(',')), K('.', c('.')), K('/', c('/')),
+   K('SHIFT', KS.ShiftR, KS.ShiftR, '', 1.5, 'm'), K('CRSR\n↕', KS.Down, KS.Up, '', 1, 'dark'), K('CRSR\n↔', KS.Right, KS.Left, '', 1, 'dark')],
+  [{ spacer: 3.5 }, K('', c(' '), c(' '), '', 8), { spacer: 4.5 }]
+];
+const FKEYS = [K('f1\nf2', KS.F1, KS.F2, '', 1, 'fn'), K('f3\nf4', KS.F3, KS.F4, '', 1, 'fn'), K('f5\nf6', KS.F5, KS.F6, '', 1, 'fn'), K('f7\nf8', KS.F7, KS.F8, '', 1, 'fn')];
+const latched = new Map();                                  // latching C64 key -> element (SHIFT, CTRL, C=)
+let locked = false;
+const shiftOn = () => locked || [...latched.keys()].some(d => d.k === KS.ShiftL || d.k === KS.ShiftR);
+function releaseLatched() { for (const [d, el] of latched) { keyUp(d.k); el.classList.remove('latched'); } latched.clear(); }
+function mkKey(d) {
+  const el = document.createElement('div');
+  if (d.spacer) { el.className = 'spacer'; el.style.flex = d.spacer + ' 1 0'; return el; }
+  el.className = 'key ' + (d.ty === 'm' || d.ty === 'l' ? 'dark' : d.ty); el.style.flex = d.w + ' 1 0';
+  el.innerHTML = (d.sl ? '<small>' + d.sl.replace(/[&<]/g, '') + '</small>' : '') + '<span>' + d.l.replace(/[&<]/g, '') + '</span>';
+  let sent = null;
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault(); el.setPointerCapture(e.pointerId);
+    if (d.ty === 'm') {                                      // latching: one touch turns on, another turns off
+      if (latched.has(d)) { latched.delete(d); el.classList.remove('latched'); keyUp(d.k); } else { latched.set(d, el); el.classList.add('latched'); keyDown(d.k); }
+      return;
+    }
+    if (d.ty === 'l') {                                      // SHIFT LOCK as on the C64: holds the left Shift down until touched again
+      locked = !locked; el.classList.toggle('lock', locked); if (locked) keyDown(KS.ShiftL); else keyUp(KS.ShiftL); return;
+    }
+    sent = shiftOn() ? d.ks : d.k; el.classList.add('down'); keyDown(sent);
+  });
+  const end = () => { if (sent === null) return; el.classList.remove('down'); keyUp(sent); sent = null; releaseLatched(); };
+  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+  return el;
+}
+(function buildKb() {
+  const kb = document.getElementById('kb'), main = document.createElement('div'), fk = document.createElement('div');
+  main.className = 'main'; fk.className = 'fk';
+  for (const r of ROWS) { const row = document.createElement('div'); row.className = 'row'; for (const d of r) row.appendChild(mkKey(d)); main.appendChild(row); }
+  for (const d of FKEYS) fk.appendChild(mkKey(d));
+  kb.append(main, fk);
+})();
+// joystick: base + knob (8-direction stick) and fire button. Joy 1 = port 1 (VICE keyset 1 on F13-F17), Joy 2 = port 2 (VICE numeric keypad).
+const JOY = {
+  j1: { name: 'JOY 1', up: 0xffca, down: 0xffcb, left: 0xffcc, right: 0xffcd, fire: 0xffce, diag: false },
+  j2: { name: 'JOY 2', up: 0xffb8, down: 0xffb2, left: 0xffb4, right: 0xffb6, fire: 0xffb0, nw: 0xffb7, ne: 0xffb9, sw: 0xffb1, se: 0xffb3, diag: true }
+};
+const SECT = [['right'], ['right', 'down'], ['down'], ['left', 'down'], ['left'], ['left', 'up'], ['up'], ['right', 'up']], DIAG = { 1: 'se', 3: 'sw', 5: 'nw', 7: 'ne' };
+function dirKeys(j, dx, dy) {                              // dx, dy in -1..1 (y downwards) -> keysyms to hold down
+  if (Math.hypot(dx, dy) < 0.35) return [];
+  const s = Math.round(((Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360) / 45) % 8;    // 0 = right, 2 = down, 4 = left, 6 = up
+  return j.diag && s % 2 ? [j[DIAG[s]]] : SECT[s].map(n => j[n]);   // Joy 2: diagonal keypad key; Joy 1: two directions together
+}
+function buildJoy(id) {
+  const j = JOY[id], box = document.getElementById(id);
+  const base = document.createElement('div'), knob = document.createElement('div'), fire = document.createElement('div'), lbl = document.createElement('div');
+  base.className = 'base'; knob.className = 'knob'; fire.className = 'fire'; fire.textContent = 'FIRE'; lbl.className = 'lbl'; lbl.textContent = j.name;
+  base.appendChild(knob); box.append(base, fire); base.appendChild(lbl);
+  let cur = new Set();
+  const apply = keys => { for (const k of cur) if (!keys.includes(k)) keyUp(k); for (const k of keys) if (!cur.has(k)) keyDown(k); cur = new Set(keys); };
+  const move = e => {
+    const r = base.getBoundingClientRect(), R = r.width / 2;
+    let dx = (e.clientX - r.left - R) / R, dy = (e.clientY - r.top - R) / R; const m = Math.hypot(dx, dy); if (m > 1) { dx /= m; dy /= m; }
+    knob.style.transform = `translate(${dx * R * 0.62}px, ${dy * R * 0.62}px)`; apply(dirKeys(j, dx, dy));
+  };
+  base.addEventListener('pointerdown', e => { e.preventDefault(); base.setPointerCapture(e.pointerId); move(e); });
+  base.addEventListener('pointermove', e => { if (base.hasPointerCapture(e.pointerId)) move(e); });
+  const rel = () => { knob.style.transform = ''; apply([]); };
+  base.addEventListener('pointerup', rel); base.addEventListener('pointercancel', rel);
+  fire.addEventListener('pointerdown', e => { e.preventDefault(); fire.setPointerCapture(e.pointerId); fire.classList.add('down'); keyDown(j.fire); });
+  const fr = () => { if (fire.classList.contains('down')) { fire.classList.remove('down'); keyUp(j.fire); } };
+  fire.addEventListener('pointerup', fr); fire.addEventListener('pointercancel', fr);
+}
+buildJoy('j1'); buildJoy('j2');
+function toggle(btnId, elId) {
+  const b = document.getElementById(btnId), el = document.getElementById(elId);
+  b.onclick = () => { const on = el.classList.toggle('show'); b.classList.toggle('on', on); if (on) inOpen(); fitJoy(); };
+}
+toggle('kbBtn', 'kb'); toggle('j1Btn', 'j1'); toggle('j2Btn', 'j2');
+function fitJoy() { document.documentElement.style.setProperty('--kbh', document.getElementById('kb').classList.contains('show') ? document.getElementById('kb').offsetHeight + 'px' : '0px'); }
+addEventListener('resize', fitJoy);
+document.getElementById('ov').addEventListener('contextmenu', e => e.preventDefault());
+
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+/* lab64:extends c64 */
+/* Lab64 manual theme "plain": black on white, no filled areas (cheap to print at home, readable in black and white). Built on
+   "c64" (same layout and classes): only colours and the rules that used filled backgrounds change. Copyright (c) 2026 - Simone Caporale */
+:root {
+  --paper: #ffffff; --ink: #111111; --accent: #111111; --muted: #666666; --soft: #444444; --rule: #bbbbbb; --note-bg: #ffffff;
+  --cover-bg: #ffffff; --cover-ink: #111111; --cover-band: #111111; --cover-title: #111111; --cover-shadow: transparent;
+  --cover-foot: #444444; --code-bg: #ffffff; --code-ink: #111111; --shot-bg: #ffffff;
+  --key-face: #ffffff; --key-ink: #111111; --key-shadow: #888888;
+}
+.page { border-top: .6mm solid var(--ink) }
+.cover { border: .6mm solid var(--ink) }
+.cover h1 { text-shadow: none; letter-spacing: 2px }
+h1 { border-bottom-width: .3mm }
+h2 { background: none; color: var(--ink); border-bottom: .3mm solid var(--ink); padding: 0 0 .3mm; display: block }
+th { background: none; color: var(--ink); font-weight: bold; border-bottom: .4mm solid var(--ink) }
+.cmd { border: .3mm solid var(--ink); font-weight: bold }
+.note { border-width: .3mm; border-left-width: 1.2mm }
+img.shot, img.half { border-color: var(--ink) }

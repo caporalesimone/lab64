@@ -1,0 +1,6 @@
+# example: prints a text and takes a screenshot (c64 --outdir output script work/scripts/example.txt)
+wait "READY." 10s
+0 text "print \"hello\"\n"
+wait 30
+assert screen "HELLO"
+screenshot example

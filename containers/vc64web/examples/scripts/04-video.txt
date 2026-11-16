@@ -1,0 +1,7 @@
+# Deterministic video inside the script, closed anyway at the end of the script (autostop).
+# Needs the core stopped:  c64 pause ; c64 --outdir ../output script scripts/04-video.txt
+wait "READY." 10s
+video start intro every=4 scale=2
+0 text "print \"video\"\n"
+wait 80
+video stop

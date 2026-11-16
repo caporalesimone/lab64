@@ -1,0 +1,7 @@
+# Prints a text, checks that it shows up and takes a screenshot.
+# Run:  c64 --outdir ../output script scripts/01-hello.txt      (emulator started)
+wait "READY." 10s
+0 text "print \"hello\"\n"
+wait 40
+assert screen "HELLO"
+screenshot hello

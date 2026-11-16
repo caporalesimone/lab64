@@ -1,0 +1,19 @@
+# Commodore ROMs: NOT in git, one line per file (names, sizes and SHA-256 in roms.md). The user copies them here before building the images.
+# The folders vice-roms/C64/ and vice-roms/DRIVES/ stay in git through their .gitkeep.
+vice-roms/C64/kernal-901227-03.bin
+vice-roms/C64/basic-901226-01.bin
+vice-roms/C64/chargen-901225-01.bin
+vice-roms/DRIVES/dos1541ii-251968-03.bin
+vice-roms/DRIVES/dos1541-325302-01+901229-05.bin
+vice-roms/DRIVES/dos1570-315090-01.bin
+vice-roms/DRIVES/dos1571-310654-05.bin
+vice-roms/C64/kernal-901227-02.bin
+vice-roms/C64/kernal-901227-01.bin
+vice-roms/C64/kernal-251104-04.bin
+vice-roms/C64/kernal-390852-01.bin
+vice-roms/C64/kernal-901246-01.bin
+vice-roms/C64/kernal-906145-02.bin
+vice-roms/C64/chargen-906143-02.bin
+# Optional Open ROMs (e.g. MEGA65 Open ROMs): only the folder is in git (placeholder), never its contents.
+open-roms/*
+!open-roms/.gitkeep

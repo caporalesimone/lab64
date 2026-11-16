@@ -1,0 +1,8 @@
+# poke, assert and wait on memory (free addresses at $C000).
+wait "READY." 10s
+poke 0xC000 1,2,3
+assert mem=0xC001 2
+assert mem=0xC002 3
+0 text "poke 49155,9\n"
+wait mem=0xC003 9 300
+assert mem=0xC003 9

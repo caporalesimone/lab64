@@ -1,0 +1,164 @@
+#!/bin/sh
+# lab64: the Lab64 command line, HOST side (14/11). Copyright (c) 2026 - Simone Caporale
+# --- usage (printed by "lab64 help": everything up to the end marker)
+# Install once: <lab64 folder>/cli/lab64 install (a link in ~/.local/bin). Then, from a project folder (the one with lab64.env):
+#   lab64 init [--name N] [--title T]   new project in the current folder: a ready-to-build skeleton (never overwrites a file)
+#   lab64 build [args]         C64_BUILD of lab64.env (a host command, e.g. ./build.sh) or the default build (in lab64-tools)
+#   lab64 test [--view|--no-view] [--emu] [args]   C64_TEST of lab64.env or the Lab64 test engine:
+#                              [smoke|sanity|regression|all] [-k ID] [--list] (exit 2: bad arguments or no test selected).
+#                              --view: on the viewer screen (default when the viewer runs), --no-view: never; --emu: vc64web up
+#                              for this run (stopped after, if it was off) and C64_EMU=1; with C64_TEST only C64_EMU=1 (the
+#                              project command starts vc64web itself, e.g. lab64 up vc64web)
+#   lab64 manual [args]        the instruction manuals (PDF, in lab64-pdf-gen): C64_MANUAL of lab64.env or the default one
+#   lab64 map [args]           automatic memory and disk map (out/work/memory-map/index.html)
+#   lab64 publish [args]       release folder out/releases/v<version>/ with manifest.json for the viewer (default build: automatic)
+#   lab64 run [-i IMAGE] <command>   a command in lab64-tools (or lab64-IMAGE, e.g. -i pdf-gen)   lab64 shell   a shell there
+#   lab64 up [service...]      the compose stack of this project: tools (always on: commands run in it, faster), vc64web,
+#                              viewer + player; or only the services named (tools, vc64web, viewer)
+#   lab64 down [service...]    stop the stack, or the services named          lab64 ps   what runs
+#   lab64 view | stop          the viewer on http://localhost:6080 (and its player) | stop it
+#   lab64 play <command>       a command in lab64-tools on the viewer screen with audio (e.g. lab64 play x64sc)
+#   lab64 page [FOLDER]        only the portable vc64web page, one HTML file with the emulator and all the ROMs (default out/work/vc64web/)
+#   lab64 clean [--keep-release-only] [--dry-run]   deletes what a build can recreate in out/: out/work and out/tmp (default), or
+#                              everything but out/releases (--keep-release-only: also out/cache); --dry-run only lists. Never touches sources
+#   lab64 images [--force] [names]   build the images        lab64 check-env   check the host        lab64 version
+#   lab64 upgrade              git pull of Lab64, then the missing images      lab64 install [DIR]   link this command in DIR
+# Inside the Lab64 containers the same "lab64" command exists for the container part (init, build, publish, test, manual, map):
+# project scripts that run there call it directly (e.g. "lab64 map" at the end of a build step).
+# Commands run inside the containers get: project at /work (current folder), Lab64 at /lab64 (read-only, LAB64=/lab64), the Lab64
+# Python library importable (vicemon, c64test, c64manual, c64publish, psid). Nested calls use this same Lab64.
+# Services (docker/compose.yaml, Docker Compose v2): one project at a time; lab64 up for another project asks to stop the first.
+# Viewer settings (lab64.env or environment): VIEW_PORT (6080), VIEW_PASSWORD, VIEW_HOSTS, VIEW_SIZE.
+# --- end of usage
+set -eu
+TC=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+export LAB64_USER_PATH="${LAB64_USER_PATH:-$PATH}"   # the PATH before the line below (lab64 check-env checks the install there)
+export PATH="$TC/cli:$PATH"            # nested lab64 calls (C64_BUILD, C64_TEST scripts) reach THIS Lab64
+ROOT=$(cd "${C64_PROJECT:-.}" && pwd)
+[ -f "$ROOT/lab64.env" ] && . "$ROOT/lab64.env"
+VER=$(cat "$TC/VERSION")
+cmd=${1:-help}; [ $# -gt 0 ] && shift
+running() { [ -n "$(docker ps -q -f "name=^$1\$" 2>/dev/null)" ]; }
+emu() {                                # vc64web running (lab64 up): the tests reach it on the lab64 network
+    if running lab64-vc64web; then
+        export EMU_URL=http://lab64-vc64web:7064 C64_DOCKER_ARGS="${C64_DOCKER_ARGS:-} --network lab64"
+    fi
+}
+view() {                               # C64_VIEW=1: the container draws on the viewer screen and plays on its audio
+    if [ "${C64_VIEW:-}" = 1 ]; then
+        running lab64-viewer || compose_up viewer >/dev/null      # errors still reach stderr
+        export DISPLAY=:99 PULSE_SERVER=unix:/tmp/.X11-unix/pulse C64_DOCKER_ARGS="${C64_DOCKER_ARGS:-} -v lab64-x11:/tmp/.X11-unix"
+    fi
+}
+dc() {                                 # docker compose on the Lab64 stack, with the variables of docker/compose.yaml
+    docker compose version >/dev/null 2>&1 || { echo "lab64: Docker Compose v2 needed (docker compose); lab64 check-env" >&2; exit 1; }
+    # lab64.env is sourced without export: every variable used by compose.yaml is passed here explicitly
+    LAB64_DIR=$TC LAB64_PROJECT=$ROOT LAB64_VER=$VER LAB64_UID=$(id -u) LAB64_GID=$(id -g) \
+        C64_VIEW_DISK="${C64_VIEW_DISK:-}" C64_VIEW_TITLE="${C64_VIEW_TITLE:-}" C64_VIEW_PLAYER="${C64_VIEW_PLAYER:-}" \
+        VIEW_PORT="${VIEW_PORT:-}" VIEW_PASSWORD="${VIEW_PASSWORD:-}" VIEW_HOSTS="${VIEW_HOSTS:-}" VIEW_SIZE="${VIEW_SIZE:-}" \
+        docker compose -f "$TC/docker/compose.yaml" "$@"
+}
+compose_up() {                         # compose_up SERVICE...: images, network, volume, other project check, start
+    # (errors on stderr: callers that hide the progress lines with >/dev/null must still show why it failed)
+    other=$(docker ps --format '{{.Label "lab64.project"}}' 2>/dev/null | grep -v "^$" | grep -vxF "$ROOT" | head -1 || true)
+    [ -z "$other" ] || { echo "lab64: the stack runs for $other: lab64 down there first" >&2; exit 1; }
+    for sv in "$@"; do
+        case $sv in tools|player) "$TC/build-scripts/build-images.sh" tools ;; viewer) "$TC/build-scripts/build-images.sh" viewer tools vc64web ;; vc64web) "$TC/build-scripts/build-images.sh" vc64web ;; esac
+    done
+    docker network inspect lab64 >/dev/null 2>&1 || docker network create lab64 >/dev/null
+    docker volume inspect lab64-x11 >/dev/null 2>&1 || docker volume create lab64-x11 >/dev/null
+    mkdir -p "$ROOT/out/tmp/home"
+    for c in lab64-tools lab64-vc64web lab64-viewer lab64-player; do   # containers of Lab64 1.0 (docker run, not compose)
+        [ -n "$(docker ps -aq -f "name=^$c\$" 2>/dev/null)" ] && [ -z "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' $c)" ] &&
+            docker rm -f $c >/dev/null
+    done
+    out=$(dc up -d "$@" 2>&1) || { echo "$out" >&2; exit 1; }
+    case " $* " in *" viewer "*)          # the player needs the audio socket of the viewer
+        for i in $(seq 100); do docker exec lab64-viewer test -S /tmp/.X11-unix/pulse 2>/dev/null && break; sleep 0.2; done
+        # (1.8) the player always runs with the viewer: SID Studio renders .sid files through it (C64_VIEW_PLAYER only enables VICE)
+        out=$(dc up -d player 2>&1) || { echo "$out" >&2; exit 1; } ;; esac
+    for sv in "$@"; do
+        case $sv in viewer) echo "viewer: http://localhost:${VIEW_PORT:-6080}" ;; vc64web) echo "vc64web: up (http://lab64-vc64web:7064 on the lab64 network)" ;;
+                    tools) echo "tools: up (commands run in lab64-tools)" ;; esac
+    done
+}
+incont() {                             # incont IMAGE ARGS...: the container part of the command line
+    i=$1; shift
+    "$TC/build-scripts/build-images.sh" "$i"
+    exec "$TC/cli/run.sh" "$i" lab64 "$@"
+}
+export C64_HOST_DIR="$ROOT"            # the project folder on the host (lab64 init names the project after it); run.sh passes it
+case $cmd in
+init|map|publish) incont tools "$cmd" "$@" ;;
+build)
+    if [ -n "${C64_BUILD:-}" ]; then cd "$ROOT"; exec sh -c "$C64_BUILD \"\$@\"" lab64 "$@"; fi
+    incont tools build "$@" ;;
+test)
+    EMU=0; n=$#                        # the Lab64 options out, the rest to the test engine (order kept)
+    while [ $n -gt 0 ]; do
+        x=$1; shift; n=$((n - 1))
+        case $x in --view) export C64_VIEW=1 ;; --no-view) export C64_VIEW=0 ;; --emu) EMU=1; export C64_EMU=1 ;; *) set -- "$@" "$x" ;; esac
+    done
+    if [ -n "${C64_TEST:-}" ]; then cd "$ROOT"; exec sh -c "$C64_TEST \"\$@\"" lab64 "$@"; fi
+    [ -z "${C64_VIEW:-}" ] && running lab64-viewer && export C64_VIEW=1
+    if [ $EMU = 1 ] && ! running lab64-vc64web; then
+        compose_up vc64web >/dev/null; emu; view; "$TC/build-scripts/build-images.sh" tools
+        rc=0; "$TC/cli/run.sh" tools lab64 test "$@" || rc=$?
+        dc rm -sf vc64web >/dev/null 2>&1; exit $rc
+    fi
+    [ $EMU = 1 ] && compose_up vc64web >/dev/null
+    emu; view; incont tools test "$@" ;;
+manual) incont pdf-gen manual "$@" ;;
+run)
+    IMG=tools; if [ "${1:-}" = "-i" ]; then IMG=$2; shift 2; fi
+    [ $# -ge 1 ] || { echo "lab64 run [-i IMAGE] <command>"; exit 1; }
+    case $IMG in tools|viewer|vc64web|pdf-gen) "$TC/build-scripts/build-images.sh" "$IMG" ;; esac
+    emu; view; exec "$TC/cli/run.sh" "$IMG" "$@" ;;
+shell) "$TC/build-scripts/build-images.sh" tools; exec "$TC/cli/run.sh" tools bash ;;
+up)    [ $# -gt 0 ] || set -- tools vc64web viewer; compose_up "$@" ;;
+view)  compose_up viewer ;;
+down)
+    if [ $# -eq 0 ]; then dc down --remove-orphans >/dev/null 2>&1 || true; echo "stack stopped"
+    else
+        S=""; for x in "$@"; do case $x in viewer) S="$S viewer player" ;; tools|vc64web|player) S="$S $x" ;; *) echo "lab64 down [tools|vc64web|viewer]"; exit 1 ;; esac; done
+        # shellcheck disable=SC2086
+        dc rm -sf $S >/dev/null 2>&1 || true; echo "stopped:$S"
+    fi ;;
+stop)  dc rm -sf viewer player >/dev/null 2>&1 || true; echo "viewer stopped" ;;
+ps)    dc ps ;;
+play)
+    [ $# -ge 1 ] || { echo "lab64 play <command>"; exit 1; }
+    export C64_VIEW=1; view; "$TC/build-scripts/build-images.sh" tools; exec "$TC/cli/run.sh" tools "$@" ;;
+page)                                  # (1.10) only the portable vc64web page, one HTML file (no images built)
+    D=${1:-out/work/vc64web}
+    case $D in /*) echo "lab64 page [FOLDER]: a folder inside the project (default out/work/vc64web)" >&2; exit 1 ;; esac
+    "$TC/build-scripts/check_roms.sh" >/dev/null || { "$TC/build-scripts/check_roms.sh"; exit 1; }
+    "$TC/build-scripts/build-images.sh" tools
+    mkdir -p "$ROOT/$D"
+    "$TC/cli/run.sh" tools python3 /lab64/containers/vc64web/build.py --portable-only --no-docker --vice-roms /opt/roms/vice-roms --out "/work/$D" | tail -1
+    ls "$ROOT/$D"/VirtualC64-v*.html | tail -1 ;;
+clean)
+    KEEP=0; DRY=0
+    for a in "$@"; do case $a in --keep-release-only) KEEP=1 ;; --dry-run) DRY=1 ;; *) echo "lab64 clean [--keep-release-only] [--dry-run]" >&2; exit 1 ;; esac; done
+    [ -f "$ROOT/lab64.env" ] || { echo "lab64 clean: no lab64.env in $ROOT (run it from the project folder)" >&2; exit 1; }
+    O=$ROOT/out
+    [ -d "$O" ] && [ ! -L "$O" ] || { echo "nothing to clean: no out/ folder"; exit 0; }
+    # what is kept: out/releases (always), out/cache (unless --keep-release-only), out/.gitkeep
+    for p in "$O"/* "$O"/.[!.]*; do
+        [ -e "$p" ] || [ -L "$p" ] || continue
+        b=${p##*/}
+        case $b in releases|.gitkeep) continue ;; cache) [ $KEEP = 1 ] || continue ;; esac
+        sz=$(du -sk "$p" | cut -f1); T=$(( ${T:-0} + sz ))
+        if [ $DRY = 1 ]; then echo "would delete out/$b ($((sz / 1024)) MB)"; else rm -rf "$p"; echo "deleted out/$b ($((sz / 1024)) MB)"; fi
+    done
+    echo "${T:-0} KB $([ $DRY = 1 ] && echo 'to free' || echo 'freed'); kept: out/releases$([ $KEEP = 1 ] || echo ', out/cache')" ;;
+images)  exec "$TC/build-scripts/build-images.sh" "$@" ;;
+check-env) exec "$TC/cli/check_env.sh" "$@" ;;
+version) echo "Lab64 $VER ($TC)" ;;
+upgrade) git -C "$TC" pull --ff-only && exec "$TC/build-scripts/build-images.sh" ;;
+install)
+    D=${1:-$HOME/.local/bin}; mkdir -p "$D"; ln -sf "$TC/cli/lab64" "$D/lab64"; echo "lab64 -> $D/lab64"
+    case ":$PATH:" in *":$D:"*) ;; *) echo "add $D to the PATH (e.g. in ~/.profile: export PATH=\"$D:\$PATH\")" ;; esac ;;
+help|-h|--help) sed -n '/^# --- usage/,/^# --- end of usage/{/^# ---/d;s/^# \{0,1\}//;p;}' "$TC/cli/lab64" ;;
+*) echo "lab64: unknown command '$cmd' (lab64 help)" >&2; exit 1 ;;
+esac

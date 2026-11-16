@@ -1,0 +1,9 @@
+# wait text (screen code), call of a KERNAL routine (CHROUT, $FFD2, with A=65 it prints 'A').
+wait text "READY." 10s
+call 0xFFD2 a=65
+wait 2
+assert screen "A"
+# routine that never returns: without «nowait» it would give CALL_TIMEOUT (here an endless loop at $C100: JMP $C100)
+poke 0xC100 0x4C,0x00,0xC1
+call 0xC100 nowait
+wait 5

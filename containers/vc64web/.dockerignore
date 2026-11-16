@@ -1,0 +1,10 @@
+# allowlist: only what is needed to run the headless daemon goes into the image (the pages come from the "pages" context)
+*
+!headless/c64
+!headless/c64d.js
+!headless/c64-batch
+!headless/c64-api.js
+!headless/APIVER
+!headless/package.json
+!docs/C64-API.md
+!docs/scripting.md

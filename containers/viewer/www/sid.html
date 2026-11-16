@@ -1,0 +1,1176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SID Studio</title>
+<!-- Lab64 viewer: SID Studio (14/11). Copyright (c) 2026 - Simone Caporale
+     sid.html?src=<out/...>   a .sid file or a folder of .sid files of this viewer (the release music); the user can add his own .sid
+     files (button or drag and drop: with the jsSID source they stay in the browser; with the reSID source a dropped file is sent to the
+     local Lab64 container to be rendered, and the page says so once).
+     Sound: jsSID 0.9.1 by Hermit (vendor/jssid/jsSID.js, WTFPL) with the Lab64 hooks of containers/viewer/jssid_patch.py: voice outputs,
+     mute, filter bypass, memory, cycles of the play routine, envelopes, audio routing, video standard (PAL / NTSC). The engine runs
+     in an AudioWorklet (sidengine.js: proxy with the API of jsSID, telemetry about 60 times a second) or, without a secure context /
+     AudioWorklet or with ?engine=script, in jsSID's ScriptProcessor. After jsSID: 3-band EQ, tone preset, analyser,
+     recorder tap, speakers (Web Audio); offline WAV export (SIDEngine.renderOffline: OfflineAudioContext + the same worklet). VICE stays the reference emulator: jsSID timing and filter are approximations.
+     (1.8) Audio source: jsSID (live, as above) or reSID (rendered): the viewer's /render endpoint runs sidplayfp (reSIDfp) in the player
+     container and the page plays the WAV (or the published MP3 for release tunes with the default settings) through an
+     AudioBufferSourceNode into the SAME chain (EQ, tone, analyser, REC). Panels that need the live emulation are greyed in that mode.
+     (1.9) In that mode a SILENT jsSID (the analyzer, AudioWorklet 'jssida' + checkpoint Web Worker sidck.js, class SIDEngine.Analyzer) follows the
+     WAV on the same audio clock and feeds the panels that were greyed (registers, envelopes, per-voice scopes, player CPU, piano roll,
+     automation); the override panel and solo stay greyed (they would not change what is heard). A/B (button / key B) swaps the two for
+     listening. Seek bar: the analyzer restores a checkpoint (one every 10 s) and fast-forwards in slices. -->
+<style>
+  :root {
+    --bg:#0e0f12; --rack:#17191e; --panel:#1c1f25; --line:#2c3038; --line2:#3a3f49; --txt:#d9d4c7; --dim:#8b877d;
+    --amber:#ffb547; --lcd:#0b1410; --lcdtxt:#9df5b7; --red:#ff4a3a;
+    --mono:"DejaVu Sans Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; --sans:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--txt); font:13px/1.4 var(--sans); }
+  button, select, input { font:600 12px var(--mono); color:var(--txt); }
+  button { background:linear-gradient(#2b2f37,#20232a); border:1px solid #0a0b0d; border-radius:3px; padding:6px 10px; cursor:pointer; box-shadow:inset 0 1px 0 #3b404a; }
+  button:hover { background:linear-gradient(#323741,#262a32); }
+  button.on { background:linear-gradient(#ffb547,#d98a1c); color:#1b1206; box-shadow:inset 0 1px 0 #ffd18a; }
+  button.rec.on { background:linear-gradient(#ff5a48,#c3261a); color:#fff; animation:blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:.7; } }
+  select { background:#14161a; border:1px solid var(--line2); border-radius:3px; padding:5px 6px; }
+  input[type=range] { accent-color:var(--amber); }
+  .cap { font:600 10px var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--dim); }
+
+  .top { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:8px 12px;
+         background:linear-gradient(#1e2127,#15171b); border-bottom:1px solid #000; box-shadow:0 2px 10px #0008; }
+  .brand { font:700 13px var(--mono); letter-spacing:.2em; color:var(--amber); margin-right:4px; white-space:nowrap; }
+  .brand small { display:block; font:600 9px var(--mono); letter-spacing:.24em; color:var(--dim); }
+  .group { display:flex; gap:4px; align-items:center; }
+  .lcd { flex:1 1 320px; min-width:0; background:var(--lcd); border:1px solid #000; border-radius:3px; padding:5px 10px; box-shadow:inset 0 0 12px #000c;
+         font:13px var(--mono); color:var(--lcdtxt); text-shadow:0 0 6px #3df58a55; display:grid; grid-template-columns:1fr auto; gap:0 12px; }
+  .lcd .t { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lcd .a { color:#6fbf8a; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lcd .tm { font:700 18px var(--mono); text-align:right; grid-row:span 2; align-self:center; }
+  .seg button { border-radius:0; } .seg button:first-child { border-radius:3px 0 0 3px; } .seg button:last-child { border-radius:0 3px 3px 0; }
+
+  .app { display:grid; grid-template-columns:290px minmax(0,1fr); gap:10px; padding:10px; align-items:start; }
+  .lib { position:sticky; top:64px; max-height:calc(100vh - 74px); display:flex; flex-direction:column; background:var(--rack); border:1px solid var(--line); border-radius:4px; }
+  .lib .hd { padding:10px 10px 6px; border-bottom:1px solid var(--line); display:flex; flex-direction:column; gap:6px; }
+  .lib input[type=search] { width:100%; background:#101215; border:1px solid var(--line2); border-radius:3px; padding:6px 8px; font-weight:400; }
+  .lib .list { overflow:auto; flex:1; padding:4px 0 8px; }
+  .lib .grp { padding:8px 10px 3px; }
+  .lib .it { display:grid; grid-template-columns:22px 1fr auto; gap:6px; align-items:center; padding:5px 10px; cursor:pointer; border-left:3px solid transparent; }
+  .lib .it:hover { background:#20242b; }
+  .lib .it.on { background:#2a2418; border-left-color:var(--amber); }
+  .lib .it .n { font:11px var(--mono); color:var(--dim); text-align:right; }
+  .lib .it .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lib .it .au { font-size:11px; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lib .it .sub { font:10px var(--mono); color:var(--dim); }
+  .drop { margin:8px 10px 10px; border:1px dashed var(--line2); border-radius:4px; padding:10px; text-align:center; color:var(--dim); font-size:12px; }
+  .drop.over { border-color:var(--amber); color:var(--amber); background:#2a2418; }
+
+  /* desk: 12 columns x rows of 20 px (a panel unit is 5 rows = 100 px, the bottom 10 px are the gap); panels flow and fill holes */
+  .desk { display:grid; column-gap:10px; row-gap:0; grid-template-columns:repeat(12, minmax(0,1fr)); grid-auto-rows:20px; grid-auto-flow:row dense; }
+  .p { background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:6px 8px 8px; min-width:0; min-height:0; margin-bottom:10px;
+       display:flex; flex-direction:column; position:relative; overflow:hidden; }
+  .p.collapsed > :not(.ph) { display:none !important; }
+  .p.drag-before { box-shadow:-6px 0 0 -2px var(--amber); } .p.drag-after { box-shadow:6px 0 0 -2px var(--amber); }
+  .p.dragging { opacity:.4; }
+  .ph { display:flex; align-items:center; gap:6px; margin:0 0 6px; min-height:22px; }
+  .p.collapsed .ph { margin:0; }
+  .ph .grip { cursor:grab; color:var(--dim); font-size:14px; line-height:1; padding:0 2px; user-select:none; }
+  .ph .ttl { flex:1; min-width:0; display:flex; gap:8px; align-items:center; overflow:hidden; white-space:nowrap; }
+  .ph .ext { display:flex; gap:6px; align-items:center; white-space:nowrap; }
+  .ph .sz, .ph .col { padding:1px 6px; font-size:10px; min-width:34px; }
+  .ph .sz:disabled { opacity:.45; cursor:default; }
+  .rz { position:absolute; right:1px; bottom:1px; width:14px; height:14px; cursor:nwse-resize; color:var(--dim); font-size:12px; line-height:14px; text-align:center; user-select:none; }
+  .p.collapsed .rz, .p.fixed .rz { display:none; }
+  .rzlab { position:fixed; z-index:20; background:var(--amber); color:#1b1206; font:700 12px var(--mono); padding:3px 8px; border-radius:3px; pointer-events:none; display:none; }
+  .p canvas { display:block; width:100%; flex:1 1 0; min-height:0; background:#07080a; border:1px solid #000; border-radius:2px; }
+  .vu canvas { background:#000; }
+  .ch canvas.sc { flex:3 1 0; } .ch canvas.env { flex:1 1 0; margin-top:6px; }
+  .cpu .big, .cpu .kv { flex:none; }
+  .regs .tbl { overflow:auto; flex:1; min-height:0; }
+  .ovr { display:grid; grid-template-columns:110px 1fr; gap:6px 10px; align-items:center; font:11px var(--mono); overflow:auto; min-height:0; }
+  .ovr .lab { color:var(--dim); letter-spacing:.12em; text-transform:uppercase; font-size:10px; }
+  .ovr .row { display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
+  .tri { min-width:58px; position:relative; }
+  .tri.auto { background:#15171b; color:var(--dim); box-shadow:none; border-color:var(--line2); }
+  .tri.auto.live::after { content:''; position:absolute; right:4px; top:4px; width:5px; height:5px; border-radius:50%; background:var(--amber); box-shadow:0 0 4px var(--amber); }
+  .tri.force-on { background:linear-gradient(#ffb547,#d98a1c); color:#1b1206; }
+  .tri.force-off { background:linear-gradient(#5a2a24,#3a1814); color:#ffb1a8; }
+  .ovr input[type=range] { flex:1; min-width:120px; }
+  .ovr .val { min-width:13ch; color:var(--txt); }
+  .ovr .auto-t { padding:2px 7px; font-size:10px; }
+  @media (max-width:900px) { .app { grid-template-columns:1fr; } .lib { position:static; max-height:340px; }
+    .desk > .p { grid-column:span 12 !important; } .rz, .ph .sz { display:none; } }
+  .ch .ttl b { font:700 12px var(--mono); letter-spacing:.14em; }
+  .ch .ext button.mute, .ch .ext button.solo { padding:1px 7px; font-size:11px; }
+  .ch button.mute.on { background:linear-gradient(#ff5a48,#c3261a); color:#fff; }
+  .ch button.solo.on { background:linear-gradient(#ffd34a,#c9a01a); color:#1b1206; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:1px 8px; font:11px var(--mono); margin-top:6px; }
+  .kv span:nth-child(odd) { color:var(--dim); }
+  .big { font:700 22px var(--mono); color:var(--amber); }
+  .presets { display:flex; flex-wrap:wrap; gap:4px; }
+  .eq { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-top:10px; }
+  .eq label { display:flex; flex-direction:column; gap:3px; font:11px var(--mono); color:var(--dim); }
+  .eq output { color:var(--txt); }
+  table.rg { width:100%; border-collapse:collapse; font:11px var(--mono); }
+  table.rg td, table.rg th { border:1px solid var(--line); padding:3px 4px; text-align:center; }
+  table.rg th { color:var(--dim); font-weight:600; }
+  table.rg td.v { transition:background .5s; }
+  table.rg td.v.chg { background:#5a4416; transition:none; }
+  .foot { padding:4px 12px 16px; color:var(--dim); font-size:11px; }
+  .stripes { display:none; height:15px; grid-template-rows:repeat(5, 1fr); position:sticky; top:var(--toph, 56px); z-index:4; }
+  .stripes i:nth-child(1) { background:#c8301e; } .stripes i:nth-child(2) { background:#e8762b; } .stripes i:nth-child(3) { background:#f2c230; }
+  .stripes i:nth-child(4) { background:#4f9d45; } .stripes i:nth-child(5) { background:#2f6db5; }
+
+  /* (14/11) theme "commodore": the colours of the Lab64 control center (cream paper, red, rainbow stripes; light or dark like the
+     index page: its saved choice, else the system). The top bar stays the dark Commodore "box"; the displays stay dark screens. */
+  html[data-skin="c64"] { --bg:#f3ead3; --rack:#fbf6e9; --panel:#fbf6e9; --line:#d6c8a2; --line2:#c9b98f; --txt:#2a2118; --dim:#6a5a40; --amber:#8a1c14; --red:#a3261b; --key:#fffaf0; }
+  @media (prefers-color-scheme: dark) { html[data-skin="c64"]:not([data-tone="light"]) {
+    --bg:#18140f; --rack:#221c15; --panel:#221c15; --line:#3b3125; --line2:#4d4030; --txt:#efe4c8; --dim:#b3a37f; --amber:#e2735c; --red:#f08a76; --key:#2e261d; } }
+  html[data-skin="c64"][data-tone="dark"] { --bg:#18140f; --rack:#221c15; --panel:#221c15; --line:#3b3125; --line2:#4d4030; --txt:#efe4c8; --dim:#b3a37f; --amber:#e2735c; --red:#f08a76; --key:#2e261d; }
+  html[data-skin="c64"] .top { background:#14121c; box-shadow:none; --txt:#f0e6c8; --dim:#b3a37f; }
+  html[data-skin="c64"] .brand { color:#f0e6c8; } html[data-skin="c64"] .brand small { color:#c9bd9c; }
+  html[data-skin="c64"] .top button.on { background:#c8301e; color:#fff; box-shadow:none; }
+  html[data-skin="c64"] .stripes { display:grid; }
+  html[data-skin="c64"] .p { border-top:3px solid var(--amber); }
+  html[data-skin="c64"] .app button { background:var(--key); color:var(--txt); border:1px solid var(--line2); border-bottom-width:3px; box-shadow:none; }
+  html[data-skin="c64"] .app button:hover { filter:brightness(0.97); }
+  html[data-skin="c64"] .app button.on, html[data-skin="c64"] .tri.force-on { background:var(--amber); color:#fff; border-color:var(--amber); }
+  html[data-skin="c64"] .ch button.mute.on { background:#a3261b; color:#fff; } html[data-skin="c64"] .ch button.solo.on { background:#f2c230; color:#2a2118; }
+  html[data-skin="c64"] .tri.auto { background:var(--rack); color:var(--dim); }
+  html[data-skin="c64"] .tri.force-off { background:#f6dcd3; color:#a3261b; border-color:#d9a99e; }
+  html[data-skin="c64"] select, html[data-skin="c64"] .lib input[type=search] { background:var(--rack); color:var(--txt); border-color:var(--line2); }
+  html[data-skin="c64"] .top select { background:#1e1b26; color:#f0e6c8; border-color:#3a3546; }
+  html[data-skin="c64"] .lib .it:hover { background:rgba(138,28,20,0.06); }
+  html[data-skin="c64"] .lib .it.on { background:rgba(138,28,20,0.10); }
+  html[data-skin="c64"] table.rg td.v.chg { background:#f2c23066; }
+  html[data-skin="c64"] .drop.over { background:rgba(138,28,20,0.08); }
+  .err { color:var(--red); padding:4px 10px; font:12px var(--mono); }
+  /* (1.8) audio source reSID: controls that need the live jsSID emulation are greyed (never hidden: the desk keeps its layout) */
+  .na { opacity:.38; filter:grayscale(1); cursor:not-allowed; }
+  .rsband { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:6px 16px; align-items:center; background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:7px 10px; }
+  .rsband[hidden] { display:none; }
+  .rsband .rg { display:flex; gap:5px; align-items:center; white-space:nowrap; }
+  .rsband .rg label { display:flex; gap:4px; align-items:center; }
+  .rsband input[type=number] { width:64px; background:#14161a; border:1px solid var(--line2); border-radius:3px; padding:4px 5px; }
+  .rsband .rst { font:11px var(--mono); color:var(--dim); white-space:nowrap; }
+  html[data-skin="c64"] .rsband input[type=number] { background:var(--rack); color:var(--txt); border-color:var(--line2); }
+  /* (1.9) analyzer: A/B, seek bar, "jsSID synthesis" badge on the per-voice scopes */
+  .group[hidden] { display:none; }
+  #ab.on { background:linear-gradient(#ffb547,#d98a1c); color:#1b1206; }
+  #abl { min-width:13ch; } #seek { width:130px; }
+  .badge { font:9px var(--mono); padding:1px 6px; border:1px solid var(--line2); border-radius:8px; color:var(--dim); letter-spacing:.04em; white-space:nowrap; align-self:center; }
+  .badge[hidden] { display:none; }
+  .ch .badge { position:absolute; right:12px; top:38px; z-index:2; background:#000c; color:#cfc9b8; border-color:#555; }
+  .modal { position:fixed; inset:0; z-index:50; background:#000a; display:flex; align-items:center; justify-content:center; }
+  .modal[hidden] { display:none; }
+  .modal .box { max-width:460px; background:var(--panel); border:1px solid var(--line2); border-radius:6px; padding:16px 18px; display:flex; flex-direction:column; gap:12px; }
+  .modal .box p { margin:0; } .modal .box .row { display:flex; gap:8px; justify-content:flex-end; }
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="brand">LAB64 · SID STUDIO<small id="engine" title="engine of the sound: worklet = jsSID inside an AudioWorklet (audio thread, no crackles under load); script = jsSID in a ScriptProcessor on the main thread (fallback: the page needs https or localhost for the worklet; ?engine=script forces it). reSIDfp · rendered = the file rendered by sidplayfp in the Lab64 player container">jsSID</small></div>
+  <div class="group"><span class="cap">audio</span><select id="asrc" title="audio source: jsSID = live emulation in the browser (all the panels work); reSID = the tune rendered by sidplayfp (reSIDfp, cycle-exact) in your local Lab64 container and played from the WAV: the filter, EQ, meters, spectrum and REC work on it, the panels that need the live emulation are greyed"><option value="jssid">jsSID · live</option><option value="resid">reSID · rendered</option></select></div>
+  <div class="group" id="abg" hidden><button id="ab" title="A/B (key B): hear the silent jsSID analyzer instead of the rendered reSID file, at the same position (10 ms crossfade); the rendered file keeps running silent. The analyzer has jsSID's own sound: the 8580 / 6581 filter and waveforms are approximations">A/B</button><span class="cap" id="abl"></span></div>
+  <div class="group">
+    <button id="prev" title="previous (←)">⏮</button><button id="play" title="play / pause (space)">▶</button>
+    <button id="stop" title="stop">■</button><button id="next" title="next (→)">⏭</button>
+  </div>
+  <div class="lcd"><div class="t" id="title">— no tune —</div><div class="tm" id="time">0:00</div><div class="a" id="meta">load or choose a .sid</div></div>
+  <div class="group" id="seekg" hidden><span class="cap">seek</span><input id="seek" type="range" min="0" max="1000" value="0" step="1" title="seek in the rendered file: the analyzer (silent jsSID) restores a checkpoint and fast-forwards to the same point"></div>
+  <div class="group"><span class="cap">sub</span><select id="sub" title="subtune"></select></div>
+  <div class="group seg" title="what happens at the end of the length">
+    <button data-m="cont" title="keep playing">CONT</button><button data-m="next" title="go to the next tune after the length">NEXT</button><button data-m="loop" title="restart the same tune after the length">LOOP</button>
+  </div>
+  <div class="group"><span class="cap">len</span><select id="len"><option>1:00</option><option>2:00</option><option selected>3:00</option><option>4:00</option><option>5:00</option><option>10:00</option></select></div>
+  <div class="group"><span class="cap">sid</span><select id="model" title="SID chip. reSID source: AUTO follows the tune's header (6581 when it says nothing), 6581 / 8580 force the chip. Changing it renders again"><option value="auto" id="mAuto" hidden disabled>AUTO</option><option value="6581">6581</option><option value="8580">8580</option></select>
+    <select id="vid" title="video standard: AUTO follows the clock flags of the .sid header (PAL when unknown or both); PAL 985248 Hz, 19656 cycles per frame (50.12 Hz), NTSC 1022727 Hz, 17095 cycles per frame (59.83 Hz). Changing it restarts the subtune"><option value="auto">AUTO</option><option value="pal">PAL</option><option value="ntsc">NTSC</option></select></div>
+  <div class="group"><span class="cap">vol</span><input id="vol" type="range" min="0" max="150" value="100" style="width:90px"></div>
+  <div class="group"><span class="cap">theme</span><select id="skin" title="look of the page"><option value="studio">studio</option><option value="c64">commodore</option></select></div>
+  <div class="group"><button id="resetv" title="restore the default layout of the panels">⟲ VIEW</button></div>
+  <div class="group"><button id="rec" class="rec" title="record the output (after the filters) to a WAV file">● REC</button><button id="xwav" title="export a WAV file: renders the chosen length faster than real time (OfflineAudioContext + the same worklet) with the current tune, subtune, 6581 / 8580, video standard, mute / solo, SID filter, override, EQ and tone preset">⇩ WAV</button><select id="xlen" title="length of the export: the length field, or a fixed one"><option value="len">= len</option><option>0:30</option><option>1:00</option><option>2:00</option><option>3:00</option><option>5:00</option><option>10:00</option></select><span class="cap" id="xst"></span><button id="load" title="add your .sid files">＋ SID</button>
+    <input type="file" id="file" accept=".sid" multiple hidden></div>
+</div>
+<div class="stripes" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+<div class="app">
+  <div class="rsband" id="rspanel" hidden>
+    <span class="cap" title="the tune is rendered by sidplayfp (libsidplayfp 3, reSIDfp) in the local Lab64 container, faster than real time, and played from the WAV">resid · rendered</span>
+    <span class="rg" id="rg_engine"><span class="cap">engine</span><select id="rs_engine" title="reSIDfp: cycle-exact analog model (default). sidlite: lightweight emulation. (libsidplayfp 3 has no classic reSID)"><option value="residfp">reSIDfp</option><option value="sidlite">sidlite</option></select></span>
+    <span class="rg" id="rg_curve"><span class="cap">filter curve</span><span class="seg" id="rs_curve"><button data-v="0.8" title="bright: 0.8">light</button><button data-v="" title="default: 0.5">medium</button><button data-v="0.2" title="dark: 0.2">dark</button><button data-v="auto" title="the value recommended for the tune's author, when known">auto</button></span><input type="number" id="rs_curveN" min="0" max="1" step="0.05" placeholder="0.50" title="0 dark .. 1 bright (6581 and 8580 filter curve)"></span>
+    <span class="rg" id="rg_range"><span class="cap">filter range</span><span class="seg" id="rs_range"><button data-v="" title="default: 0.5">default</button><button data-v="auto" title="the value recommended for the tune's author, when known">auto</button></span><input type="number" id="rs_rangeN" min="0" max="1" step="0.05" placeholder="0.50" title="0 dark .. 1 bright (6581 filter range)"></span>
+    <span class="rg" id="rg_cw"><span class="cap">combined wf</span><span class="seg" id="rs_cw"><button data-v="w">weak</button><button data-v="" title="default">average</button><button data-v="s">strong</button></span></span>
+    <span class="rg"><label title="digi volume boost of the 8580"><input type="checkbox" id="rs_digi"> digiboost</label></span>
+    <span class="rg" id="rg_caps"><label title="6581 with the old 330 pF capacitors: brighter filter"><input type="checkbox" id="rs_caps"> 6581 old caps</label></span>
+    <span class="rg"><span class="cap">wav</span><select id="rs_bits" title="sample format of the downloaded WAV (what you hear is always 16-bit)"><option value="16">16-bit</option><option value="32">32-bit float</option></select></span>
+    <span class="rg"><button id="rs_render" title="render the tune again with these settings">⟳ render</button><button id="rs_dl" title="download the rendered WAV (44100 Hz)">⇩ WAV</button></span>
+    <span class="rst" id="rs_st"></span><span class="rst" id="an_st" title="the silent jsSID that follows the rendered file and feeds the panels (checkpoints = states every 10 s, built in a Web Worker, used by seeks)"></span>
+  </div>
+  <aside class="lib">
+    <div class="hd"><span class="cap">library</span><input type="search" id="q" placeholder="filter…"></div>
+    <div class="list" id="list"></div>
+    <div class="drop" id="drop">drop .sid files here<br><span class="cap" id="dropnote">they stay in this browser</span></div>
+    <div class="err" id="err"></div>
+  </aside>
+  <main class="desk" id="desk">
+    <section class="p vu" data-id="vu"><div class="ph"><span class="ttl cap">vu meter · 0 VU = −18 dBFS</span><span class="ext cap" id="vudb"></span></div><canvas id="vu"></canvas></section>
+    <section class="p spec" data-id="spec"><div class="ph"><span class="ttl cap">spectrum · 1/3 octave</span><span class="ext cap"><label><input type="checkbox" id="fcurve" checked> sid filter curve</label></span></div><canvas id="spec"></canvas></section>
+    <section class="p cpu" data-id="cpu"><div class="ph"><span class="ttl cap">player cpu</span></div><div class="big" id="cpuv">—</div><div class="kv" id="cpukv"></div><canvas id="cpu"></canvas></section>
+    <section class="p ch" data-id="ch0" id="ch0"></section><section class="p ch" data-id="ch1" id="ch1"></section><section class="p ch" data-id="ch2" id="ch2"></section>
+    <section class="p ch" data-id="ch3" id="ch3"></section>
+    <section class="p roll" data-id="roll"><div class="ph"><span class="ttl cap" id="rollcap">piano roll · last 10 s</span><span class="ext cap">v1 <b style="color:#57d68d">■</b> v2 <b style="color:#f2c230">■</b> v3 <b style="color:#ff8a3d">■</b></span></div><canvas id="roll"></canvas></section>
+    <section class="p auto" data-id="auto"><div class="ph"><span class="ttl cap">automation · pulse width and filter cutoff</span></div><canvas id="auto"></canvas></section>
+    <section class="p sgram" data-id="sgram"><div class="ph"><span class="ttl cap">spectrogram · 20 Hz - 20 kHz</span></div><canvas id="sgram"></canvas></section>
+    <section class="p tone" data-id="tone"><div class="ph"><span class="ttl cap">monitor tone · after the SID</span></div>
+      <div class="presets" id="presets"></div>
+      <div class="eq">
+        <label>bass 100 Hz <input type="range" id="eqL" min="-12" max="12" step="0.5" value="0"><output id="eqLv">0 dB</output></label>
+        <label>mid 1 kHz <input type="range" id="eqM" min="-12" max="12" step="0.5" value="0"><output id="eqMv">0 dB</output></label>
+        <label>treble 6 kHz <input type="range" id="eqH" min="-12" max="12" step="0.5" value="0"><output id="eqHv">0 dB</output></label>
+      </div></section>
+    <section class="p sidf" data-id="sidf"><div class="ph"><span class="ttl cap">sid filter · override</span><span class="ext cap">● = set by the tune</span></div>
+      <div class="ovr" id="ovr"></div></section>
+    <section class="p regs" data-id="regs"><div class="ph"><span class="ttl cap">sid registers $D400-$D418 (hex)</span><span class="ext cap">changed = highlighted</span></div><div class="tbl"><table class="rg" id="regs"></table></div></section>
+  </main>
+  <div class="rzlab" id="rzlab"></div>
+</div>
+<div class="modal" id="modal" hidden role="dialog" aria-modal="true"><div class="box"><p id="modaltxt"></p><div class="row"><button id="mno">cancel</button><button id="mok" class="on">OK, render it</button></div></div></div>
+<div class="foot">jsSID 0.9.1 by Hermit (WTFPL) with the Lab64 hooks. Scopes: waveform × envelope of each voice before the SID filter. Player CPU, filter curve and timing are
+jsSID estimates: VICE is the reference. With the jsSID source your files are read in the browser and never leave it; with reSID they go to your local Lab64 container only. Keys: space play/pause, ← → previous/next.</div>
+<script src="vendor/jssid/jsSID.js"></script>
+<script src="sidengine.js"></script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+// real frame rates: PAL 985248 / 19656 cycles = 50.12 Hz, NTSC 1022727 / 17095 = 59.83 Hz (not 50 / 60)
+const HZ = { pal: (985248 / 19656).toFixed(2) + ' Hz', ntsc: (1022727 / 17095).toFixed(2) + ' Hz' };
+const fmt = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+const VC = ['#57d68d', '#f2c230', '#ff8a3d', '#7fb2ff'];
+const store = { get(k, d) { try { const v = localStorage.getItem('lab64.sid.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+                set(k, v) { try { localStorage.setItem('lab64.sid.' + k, JSON.stringify(v)); } catch (e) {} } };
+
+// ------------------------------------------------------------------ theme: studio (dark desk) or commodore (the control center look; its light /
+// dark choice is shared: key "theme" of the index page, same origin)
+function skin(v) {
+  document.documentElement.dataset.skin = v; $('skin').value = v; store.set('skin', v);
+  let t = null; try { t = localStorage.getItem('theme'); } catch (e) {}
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.tone = t; else delete document.documentElement.dataset.tone;
+  document.documentElement.style.setProperty('--toph', document.querySelector('.top').offsetHeight + 'px');
+}
+$('skin').onchange = () => skin($('skin').value);
+skin(store.get('skin', 'studio'));
+window.addEventListener('resize', () => document.documentElement.style.setProperty('--toph', document.querySelector('.top').offsetHeight + 'px'));
+
+// ------------------------------------------------------------------ library: release files (?src=out/...) + the user's files
+const raw = new URLSearchParams(location.search).get('src') || '';
+const src = /^out\/[^?#]*$/.test(raw) && !raw.split('/').includes('..') ? raw : '';      // only files of this viewer
+const lib = [];                                            // {url, file, group, name, author, released, songs, start, buf (a dropped file)}
+let cur = -1, player = null, playing = false, mode = store.get('mode', 'next');
+let SRCMODE = store.get('source', 'jssid') === 'resid' ? 'resid' : 'jssid';       // (1.8) audio source: jsSID (live) or reSID (rendered)
+const LIVE = () => SRCMODE === 'jssid';
+const MP3 = new Set();                                     // published MP3 renders seen in the release listing
+
+function psidInfo(buf) {                                  // PSID / RSID header: name, author, released, subtunes
+  const d = new Uint8Array(buf), s = (o) => { let t = ''; for (let i = 0; i < 32 && d[o + i]; i++) t += String.fromCharCode(d[o + i]); return t.trim(); };
+  const magic = String.fromCharCode(d[0], d[1], d[2], d[3]);
+  if (magic !== 'PSID' && magic !== 'RSID') throw new Error('not a SID file');
+  const fl = ((d[4] << 8) | d[5]) >= 2 ? (d[0x76] << 8) | d[0x77] : 0;               // PSID v2+ flags: bits 2-3 = clock
+  return { name: s(0x16), author: s(0x36), released: s(0x56), songs: (d[0x0E] << 8) | d[0x0F], start: (d[0x10] << 8) | d[0x11], rsid: magic === 'RSID',
+    clock: ['unknown', 'pal', 'ntsc', 'any'][(fl >> 2) & 3] };
+}
+async function listing(dir) {
+  const r = await fetch(dir, { cache: 'no-cache' });
+  if (!r.ok) throw new Error(dir + ': HTTP ' + r.status);
+  const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+  const hrefs = [...doc.querySelectorAll('a')].map(a => a.getAttribute('href') || '').filter(h => !h.includes('/'));
+  hrefs.filter(h => /\.mp3$/i.test(h)).forEach(h => MP3.add(dir + h));
+  return hrefs.filter(h => /\.sid$/i.test(h)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map(h => dir + h);
+}
+async function addUrl(url, group) {
+  const file = decodeURIComponent(url.split('/').pop());
+  let info = { name: file.replace(/\.sid$/i, ''), author: '', released: '', songs: 1, start: 1 };
+  try { info = Object.assign(info, psidInfo(await (await fetch(url)).arrayBuffer())); } catch (e) { info.err = String(e.message || e); }
+  lib.push(Object.assign({ url, file, group }, info));
+}
+async function addFiles(files) {
+  for (const f of files) {
+    if (!/\.sid$/i.test(f.name)) continue;
+    try {
+      const buf = await f.arrayBuffer(), info = psidInfo(buf);
+      lib.push(Object.assign({ url: URL.createObjectURL(new Blob([buf])), file: f.name, group: 'your files', buf }, info));
+    } catch (e) { $('err').textContent = f.name + ': ' + (e.message || e); }
+  }
+  renderLib();
+}
+function renderLib() {
+  const q = $('q').value.toLowerCase(); let html = '', g = null, n = 0;
+  lib.forEach((x, i) => {
+    if (q && !(x.name + ' ' + x.author + ' ' + x.file).toLowerCase().includes(q)) return;
+    if (x.group !== g) { g = x.group; html += `<div class="grp cap">${esc(g)}</div>`; }
+    html += `<div class="it${i === cur ? ' on' : ''}" data-i="${i}"><span class="n">${++n}</span><span><div class="nm">${esc(x.name || x.file)}</div>` +
+      `<div class="au">${esc(x.author || x.file)}</div></span><span class="sub">${x.songs > 1 ? x.songs + ' sub' : ''}${x.rsid ? ' RSID' : ''}</span></div>`;
+  });
+  $('list').innerHTML = html || '<div class="grp cap">no tunes: add your .sid files</div>';
+}
+$('list').onclick = e => { const it = e.target.closest('.it'); if (it) load(+it.dataset.i, null); };
+$('q').oninput = renderLib;
+$('load').onclick = () => $('file').click();
+$('file').onchange = () => addFiles($('file').files);
+const hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes('Files');   // files from the computer, not a panel being moved
+['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => { if (!hasFiles(e)) return; e.preventDefault(); $('drop').classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => document.addEventListener(ev, e => { if (!hasFiles(e)) return; e.preventDefault(); if (ev === 'drop' || !e.relatedTarget) $('drop').classList.remove('over'); }));
+document.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+
+// ------------------------------------------------------------------ transport
+function lenSec() { const [m, s] = $('len').value.split(':'); return +m * 60 + +s; }
+function arm() {                                          // end of the length: next tune, same tune again, or nothing
+  if (!player || !LIVE()) return;                         // (reSID: the end of the rendered file, rEnded())
+  if (mode === 'cont') player.setendcallback(null, 0);
+  else player.setendcallback(() => setTimeout(() => mode === 'next' ? load(cur + 1, null) : load(cur, +$('sub').value), 0), lenSec());
+}
+function load(i, sub) {
+  if (!lib.length) return;
+  ensure();
+  cur = (i + lib.length) % lib.length;
+  const x = lib[cur], s = sub === null ? Math.max(0, (x.start || 1) - 1) : sub;
+  $('sub').innerHTML = Array.from({ length: Math.max(1, x.songs || 1) }, (_, k) => `<option value="${k}">${k + 1} / ${x.songs || 1}</option>`).join('');
+  $('sub').value = s;
+  $('title').textContent = x.name || x.file;
+  if (!LIVE()) { rStart(x, s); renderLib(); return; }     // (1.8) reSID: render (or the published MP3), then play
+  player.loadstart(x.url, s); arm();
+  playing = true; hist.reset(); CPU.max = 0; ui(); renderLib();
+}
+let metaTxt = '';
+function showMetaR() {                                     // reSID: status (rendering…) or the video standard of the render
+  const x = lib[cur]; if (!x) return;
+  const rp = R.params, clk = rp ? (rp.video !== 'auto' ? rp.video : (R.tune && R.tune.clock === 'ntsc' ? 'ntsc' : 'pal')) : '';
+  const vs = rp ? (clk === 'ntsc' ? 'NTSC ' + HZ.ntsc : 'PAL ' + HZ.pal) + (rp.video === 'auto' ? ' auto' : ' forced') + ' · ' + (rp.model === 'auto' ? 'SID auto' : rp.model + (rp.model_force ? ' forced' : '')) : '';
+  const t = [R.status && R.busy ? R.status : vs, x.author, x.released, x.file].filter(Boolean).join(' · ');
+  if (t !== metaTxt) { metaTxt = t; $('meta').textContent = t; $('meta').title = [x.author, x.released, x.file].filter(Boolean).join(' · '); }
+}
+function showMeta() {                                      // author · released · file · video standard in use (and why)
+  if (!LIVE()) return showMetaR();
+  const x = lib[cur]; if (!x) return;
+  const v = player && player.getvideo ? player.getvideo() : null;
+  const vs = v ? (v.std === 'ntsc' ? 'NTSC ' + HZ.ntsc : 'PAL ' + HZ.pal) + (v.sel === 'auto' ? ' auto' : ' forced') : '';      // first: the line is cut at the right
+  const t = [vs, x.author, x.released, x.file].filter(Boolean).join(' · ');
+  if (t !== metaTxt) {
+    metaTxt = t; $('meta').textContent = t;
+    $('meta').title = (v ? 'video standard: ' + v.std.toUpperCase() + ', clock ' + v.clk + ' Hz, ' + (v.frc || '?') + ' cycles per frame = ' + v.fr.toFixed(4) + ' Hz VBI; ' + (v.sel === 'auto' ? 'chosen from the header flags (' + v.hdr + ')' : 'forced with the selector (header flags: ' + v.hdr + ')') + '\n' : '') + [x.author, x.released, x.file].filter(Boolean).join(' · ');
+  }
+}
+function ui() { $('play').textContent = playing ? '❚❚' : '▶'; document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.m === mode)); }
+$('play').onclick = () => {
+  if (cur < 0) return load(0, null);
+  if (!LIVE()) return rToggle();
+  if (playing) player.pause(); else player.playcont(); playing = !playing; ui();
+};
+$('stop').onclick = () => { if (!LIVE()) R.stop(); else if (player) player.stop(); playing = false; ui(); };
+$('prev').onclick = () => load(cur - 1, null);
+$('next').onclick = () => load(cur + 1, null);
+$('sub').onchange = () => load(cur, +$('sub').value);
+document.querySelectorAll('.seg button').forEach(b => b.onclick = () => { mode = b.dataset.m; store.set('mode', mode); arm(); ui(); });
+$('len').value = store.get('len', '3:00'); $('len').onchange = () => { store.set('len', $('len').value); if (LIVE()) arm(); else rAgain(); };
+// model and video standard are kept per source: jsSID 6581 / 8580 and AUTO / PAL / NTSC as before; reSID adds AUTO (= follow the tune) to
+// the model, and a choice other than AUTO is forced on sidplayfp (-mof / -mnf, -vpf / -vnf)
+function modelSel() {
+  const l = LIVE(); $('mAuto').hidden = $('mAuto').disabled = l;
+  $('model').value = l ? store.get('model', '6581') : store.get('rmodel', 'auto'); $('vid').value = l ? store.get('video', 'auto') : store.get('rvideo', 'auto');
+}
+modelSel();
+$('model').onchange = () => {
+  if (LIVE()) { store.set('model', $('model').value); if (player) player.setmodel(+$('model').value); } else { store.set('rmodel', $('model').value); rAgain(); }
+};
+$('vid').onchange = () => {
+  if (!LIVE()) { store.set('rvideo', $('vid').value); rAgain(); return; }
+  store.set('video', $('vid').value); if (player) { player.setvideo($('vid').value); hist.reset(); CPU.max = 0; showMeta(); }
+};
+$('vol').oninput = () => { if (player) player.setvolume($('vol').value / 100); if (!LIVE()) gainsApply(); };
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.code === 'KeyB') abToggle();
+  else if (e.code === 'Space') { e.preventDefault(); $('play').click(); } else if (e.code === 'ArrowRight') $('next').click(); else if (e.code === 'ArrowLeft') $('prev').click();
+});
+
+// ------------------------------------------------------------------ audio chain: jsSID -> EQ -> preset -> analyser -> speakers (+ recorder tap)
+const A = { ctx: null };
+const PRESETS = [
+  ['flat', 'no extra filter', []],
+  ['warm', 'low-pass 4 kHz: the softer sound of an old TV', [['lowpass', 4000, 0.7, 0]]],
+  ['tv speaker', 'small speaker of a 1980s TV: band 180 Hz - 6 kHz with a resonance', [['highpass', 180, 0.8, 0], ['peaking', 2500, 1.2, 4], ['lowpass', 6000, 0.9, 0]]],
+  ['radio', 'AM radio band 300 Hz - 3.4 kHz', [['highpass', 300, 0.9, 0], ['lowpass', 3400, 0.9, 0]]],
+  ['bass boost', 'low shelf +8 dB under 120 Hz', [['lowshelf', 120, 0.7, 8]]],
+  ['bright', 'high shelf +6 dB above 4 kHz', [['highshelf', 4000, 0.7, 6]]],
+  ['loudness', 'low and high shelves +6 dB (quiet listening)', [['lowshelf', 100, 0.7, 6], ['highshelf', 8000, 0.7, 6]]],
+  ['hi-pass', 'high-pass 400 Hz: only the leads', [['highpass', 400, 0.7, 0]]],
+  ['lo-pass', 'low-pass 600 Hz: only bass and drums', [['lowpass', 600, 0.7, 0]]],
+];
+let preset = store.get('preset', 0);
+function ensure() {
+  if (player) return;
+  // on a click: browsers start audio only after a user gesture. The worklet engine loads its module meanwhile: its commands wait
+  player = SIDEngine.create({ engine: new URLSearchParams(location.search).get('engine') || 'auto', bgnoi: 0.0005 });
+  showEngine();
+  player.onfail = e => { $('engine').textContent = 'jsSID · ' + player.engine + ' failed'; $('err').textContent = 'audio engine: ' + (e.message || e) + ' (reload with ?engine=script)'; };
+  player.setmodel(+store.get('model', '6581')); player.setvideo(store.get('video', 'auto')); player.setvolume($('vol').value / 100); player.setfilter($('filt0').checked);
+  const ctx = A.ctx = player.getctx();
+  A.input = ctx.createGain();
+  A.eq = [['lowshelf', 100], ['peaking', 1000], ['highshelf', 6000]].map(([t, f]) => { const b = ctx.createBiquadFilter(); b.type = t; b.frequency.value = f; b.Q.value = 0.8; return b; });
+  A.post = ctx.createGain();
+  A.an = ctx.createAnalyser(); A.an.fftSize = 8192; A.an.smoothingTimeConstant = 0; A.an.minDecibels = -100; A.an.maxDecibels = 0;
+  A.rec = ctx.createScriptProcessor(4096, 1, 1); A.rec.onaudioprocess = e => { if (REC.on) REC.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+  A.sink = ctx.createGain(); A.sink.gain.value = 0;      // keeps the recorder running without sending it twice to the speakers
+  A.input.connect(A.eq[0]); A.eq[0].connect(A.eq[1]); A.eq[1].connect(A.eq[2]);
+  A.post.connect(A.an); A.an.connect(ctx.destination); A.post.connect(A.rec); A.rec.connect(A.sink); A.sink.connect(ctx.destination);
+  A.fft = new Float32Array(A.an.frequencyBinCount); A.td = new Float32Array(A.an.fftSize);
+  A.pre = []; setPreset(preset); eqSet();
+  player.setoutput(A.input); player.setoverride(Object.assign({}, OV));
+  [0, 1, 2].forEach(applyMute);
+  if (!LIVE()) player.pause();                            // reSID source: the live engine is created for its audio context and chain only
+}
+function setPreset(i) {
+  preset = i; store.set('preset', i);
+  document.querySelectorAll('#presets button').forEach((b, k) => b.classList.toggle('on', k === i));
+  if (!A.ctx) return;
+  A.eq[2].disconnect(); A.pre.forEach(n => n.disconnect());
+  A.pre = PRESETS[i][2].map(([t, f, q, g]) => { const b = A.ctx.createBiquadFilter(); b.type = t; b.frequency.value = f; b.Q.value = q; b.gain.value = g; return b; });
+  let n = A.eq[2]; for (const b of A.pre) { n.connect(b); n = b; } n.connect(A.post);
+}
+function eqSet() { ['eqL', 'eqM', 'eqH'].forEach((id, k) => { $(id + 'v').textContent = (+$(id).value > 0 ? '+' : '') + $(id).value + ' dB'; if (A.eq) A.eq[k].gain.value = +$(id).value; }); }
+$('presets').innerHTML = PRESETS.map(([n, t]) => `<button title="${t}">${n}</button>`).join('');
+document.querySelectorAll('#presets button').forEach((b, i) => { b.onclick = () => setPreset(i); });
+['eqL', 'eqM', 'eqH'].forEach(id => { $(id).oninput = eqSet; });
+
+// 16-bit mono WAV of the chunks (Float32Array list), downloaded under the name
+function saveWav(chunks, sr, name) {
+  const n = chunks.reduce((a, c) => a + c.length, 0), b = new DataView(new ArrayBuffer(44 + n * 2));
+  const w = (o, t) => [...t].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); b.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+  b.setUint32(24, sr, true); b.setUint32(28, sr * 2, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, 'data'); b.setUint32(40, n * 2, true);
+  let o = 44; for (const c of chunks) for (const v of c) { b.setInt16(o, Math.max(-1, Math.min(1, v)) * 32767, true); o += 2; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+  a.download = name.replace(/[^\w.-]+/g, '_') + '.wav'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+const tuneName = () => (lib[cur] && lib[cur].name) || 'sid';
+
+// recorder: 16-bit mono WAV of what you hear (after EQ and preset)
+const REC = { on: false, chunks: [] };
+$('rec').onclick = () => {
+  if (!REC.on) { if (!player) return; REC.chunks = []; REC.on = true; $('rec').classList.add('on'); return; }
+  REC.on = false; $('rec').classList.remove('on');
+  saveWav(REC.chunks, A.ctx.sampleRate, tuneName());
+};
+
+// offline export (15/11): the chosen length rendered faster than real time with an OfflineAudioContext and the same worklet, with
+// the settings of the page (tune, subtune, model, video standard, mute / solo, SID filter, override, EQ and tone preset)
+const xlenSec = () => { const v = $('xlen').value; if (v === 'len') return lenSec(); const [m, s] = v.split(':'); return +m * 60 + +s; };
+function offlineChain(ctx, node) {                          // the EQ and tone preset of the page, as in the live chain
+  let n = node;
+  [['lowshelf', 100, 'eqL'], ['peaking', 1000, 'eqM'], ['highshelf', 6000, 'eqH']].forEach(([t, f, id]) => { const b = ctx.createBiquadFilter(); b.type = t; b.frequency.value = f; b.Q.value = 0.8; b.gain.value = +$(id).value; n.connect(b); n = b; });
+  for (const [t, f, q, gn] of PRESETS[preset][2]) { const b = ctx.createBiquadFilter(); b.type = t; b.frequency.value = f; b.Q.value = q; b.gain.value = gn; n.connect(b); n = b; }
+  n.connect(ctx.destination);
+}
+async function renderExport(secs) {                         // {samples, sr, took}
+  const x = lib[cur]; if (!x) throw new Error('choose a tune first');
+  const sr = A.ctx ? A.ctx.sampleRate : 48000, solo = SOLO.some(Boolean);
+  const buf = await (await fetch(x.url)).arrayBuffer();
+  const cmds = [{ n: 'setmodel', a: [+$('model').value] }, { n: 'setvolume', a: [$('vol').value / 100] }, { n: 'setfilter', a: [$('filt0').checked] },
+    ...[0, 1, 2].map(i => ({ n: 'setmute', a: [i, MUTE[i] || (solo && !SOLO[i])] })), { n: 'setoverride', a: [Object.assign({}, OV)] }, { n: 'setvideo', a: [$('vid').value] }];
+  return SIDEngine.renderOffline({ buf, sub: +$('sub').value, seconds: secs || xlenSec(), sr, cmds, bgnoi: 0.0005, build: offlineChain,
+    onprogress: f => { $('xst').textContent = 'rendering ' + Math.round(f * 100) + '%'; } });
+}
+let exporting = false;
+$('xwav').disabled = !SIDEngine.offlineOk();
+if ($('xwav').disabled) { $('xwav').title = 'WAV export needs AudioWorklet, which the browser offers only in a secure context (https or localhost): this page is not one, or the browser has no AudioWorklet'; $('xlen').disabled = true; }
+$('xwav').onclick = async () => {
+  if (exporting || !LIVE()) return;
+  if (cur < 0) { $('xst').textContent = 'choose a tune first'; return; }
+  exporting = true; $('xwav').disabled = true; $('xst').textContent = 'rendering 0%';
+  try {
+    const secs = xlenSec(), r = await renderExport(secs);
+    saveWav([r.samples], r.sr, tuneName() + '_' + (+$('sub').value + 1) + '_' + $('model').value);
+    $('xst').textContent = 'exported ' + fmt(secs) + ' in ' + r.took.toFixed(1) + ' s (' + (secs / r.took).toFixed(0) + 'x real time)';
+  } catch (e) { $('xst').textContent = 'export failed: ' + (e.message || e); }
+  exporting = false; $('xwav').disabled = false;
+};
+
+// ------------------------------------------------------------------ channel strips (3 voices + master)
+const NAMES = ['VOICE 1', 'VOICE 2', 'VOICE 3', 'MASTER'];
+const MUTE = [false, false, false], SOLO = [false, false, false];
+[0, 1, 2, 3].forEach(i => {
+  $('ch' + i).innerHTML = `<div class="ph"><span class="ttl"><b style="color:${VC[i]}">${NAMES[i]}</b>` +
+    (i < 3 ? `<span class="badge" id="bd${i}" hidden title="with the reSID source the scopes and envelopes show the synthesis of the silent jsSID analyzer, not reSID's: the waveforms differ a little, the timing is the same">jsSID synthesis</span>` : '') + `</span><span class="ext">` +
+    (i < 3 ? `<button class="mute" id="mu${i}" title="mute">M</button><button class="solo" id="so${i}" title="solo">S</button>` : `<label class="cap"><input type="checkbox" id="filt0" checked> sid filter</label>`) +
+    `</span></div><canvas class="sc" id="sc${i}"></canvas>` + (i < 3 ? `<canvas class="env" id="en${i}"></canvas>` : '') + `<div class="kv" id="kv${i}"></div>`;
+});
+function applyMute(i) {
+  if (!LIVE()) { if (AN) AN.call('setmute', i, MUTE[i]); return; }          // reSID: only matters for A/B (the rendered file needs a render again)
+  if (!player) return; const solo = SOLO.some(Boolean); player.setmute(i, MUTE[i] || (solo && !SOLO[i]));
+}
+[0, 1, 2].forEach(i => {
+  $('mu' + i).onclick = () => { MUTE[i] = !MUTE[i]; $('mu' + i).classList.toggle('on', MUTE[i]); [0, 1, 2].forEach(applyMute); rsUI(); };
+  $('so' + i).onclick = () => { SOLO[i] = !SOLO[i]; $('so' + i).classList.toggle('on', SOLO[i]); [0, 1, 2].forEach(applyMute); };
+});
+$('filt0').onchange = () => { if (LIVE()) { if (player) player.setfilter($('filt0').checked); } else { if (AN) AN.call('setfilter', $('filt0').checked); rsUI(); } };
+setPreset(preset); eqSet();
+
+
+// ------------------------------------------------------------------ audio source reSID (1.8): the tune rendered by sidplayfp, played from the WAV
+// POST /render (viewer server -> player daemon -> containers/tools/py/sidrender.py) renders with the page's settings; the WAV (or, for release tunes with the
+// default settings, the published MP3) is decoded and played by an AudioBufferSourceNode into A.input: the SAME chain as jsSID (EQ, tone
+// preset, analyser, recorder). The live jsSID engine only stays around for its AudioContext and is stopped.
+const R_LEAD = 0.08;                                      // (1.9) the WAV is scheduled this far ahead: the analyzer is armed for the same context frame
+let AN = null;                                            // (1.9) the analyzer (silent jsSID), created by the first reSID render
+const ANAV = () => SIDEngine.workletOk() && (new URLSearchParams(location.search).get('engine') || 'auto') !== 'script';   // it needs AudioWorklet
+const R = { ab: false, off: 0, buf: null, node: null, gain: null, startCtx: 0, pos: 0, running: false, params: null, tune: null, file: null, from: '', gen: 0, speed: 10, busy: false, status: '', t0: 0, timer: 0 };
+R.time = () => R.running ? Math.max(R.off, Math.min(R.buf ? R.buf.duration : 0, A.ctx.currentTime - R.startCtx)) : R.pos;
+R.kill = () => { if (R.node) { const n = R.node; R.node = null; n.onended = null; try { n.stop(); } catch (e) { /* not started */ } try { n.disconnect(); } catch (e) { /* not connected */ } } R.running = false; };
+R.start = off => {
+  R.kill(); if (!R.buf || !A.ctx) return;
+  if (!R.gain) { R.gain = A.ctx.createGain(); R.gain.connect(A.input); }
+  R.gain.gain.cancelScheduledValues(0); R.gain.gain.value = R.ab ? 0 : $('vol').value / 100;
+  const n = A.ctx.createBufferSource(); n.buffer = R.buf; n.connect(R.gain);
+  n.onended = () => { if (R.node === n) rEnded(); };
+  off = Math.max(0, Math.min(off, R.buf.duration - 0.001));
+  const sr = A.ctx.sampleRate, T = Math.round((A.ctx.currentTime + R_LEAD) * sr) / sr;      // a frame of the context: the analyzer starts at the same one
+  n.start(T, off); R.node = n; R.startCtx = T - off; R.off = off; R.running = true;
+  if (A.ctx.state === 'suspended') A.ctx.resume().catch(() => {});
+  if (AN) AN.play(T, off);
+};
+R.pause = () => { if (!R.running) return; R.pos = R.time(); R.kill(); if (AN) AN.pause(); };
+R.stop = () => { R.kill(); R.pos = 0; if (AN) AN.stop(); };
+function rEnded() {                                        // the rendered file ended: NEXT / LOOP / CONT (CONT stops: a render has the length of LEN)
+  R.running = false; R.node = null; R.pos = 0; if (AN) AN.pause();
+  if (mode === 'next') setTimeout(() => load(cur + 1, null), 0);
+  else if (mode === 'loop') { R.start(0); } else { playing = false; ui(); }
+}
+function rToggle() {
+  if (R.busy) return;
+  if (!R.buf) return load(cur, +$('sub').value);
+  if (playing) { R.pause(); playing = false; } else { R.start(R.pos); playing = true; }
+  ui();
+}
+function rSeek(sec) {                                      // (1.9) seek in the rendered file; the analyzer follows (checkpoint + fast-forward)
+  if (LIVE() || !R.buf || R.busy) return;
+  sec = Math.max(0, Math.min(R.buf.duration - 0.05, sec)); hist.reset();
+  if (playing && R.running) R.start(sec); else { R.pos = sec; if (AN) AN.hold(sec); }
+}
+let seekDrag = false;
+$('seek').oninput = () => { seekDrag = true; if (R.buf) $('time').textContent = fmt($('seek').value / 1000 * R.buf.duration); };
+$('seek').onchange = () => { seekDrag = false; if (R.buf) rSeek($('seek').value / 1000 * R.buf.duration); };
+function gainsApply() {                                    // WAV and analyzer: one audible (A/B, 10 ms crossfade), the other running silent
+  const v = $('vol').value / 100;
+  if (R.gain) SIDEngine.fade(A.ctx, R.gain.gain, R.ab ? 0 : v);
+  if (AN) AN.setAudible(R.ab, v);
+}
+function abUI() {
+  $('ab').classList.toggle('on', R.ab);
+  $('abl').textContent = R.ab ? (AN && AN.locked ? 'hearing jsSID' : 'hearing jsSID · analyzing…') : 'hearing reSID';
+}
+function abToggle() { if (LIVE() || !AN || !R.buf) return; R.ab = !R.ab; gainsApply(); abUI(); showEngine(); }
+$('ab').onclick = abToggle;
+function anEnsure() {                                      // the analyzer needs the audio chain (A.input) and the worklet module of the live player
+  if (AN || !A.ctx || !player || player.engine !== 'worklet' || !ANAV()) return AN;
+  AN = new SIDEngine.Analyzer(A.ctx, player.ready, A.input);
+  AN.onfail = e => { $('err').textContent = 'analyzer: ' + (e.message || e); };
+  [0, 1, 2].forEach(applyMute); AN.call('setfilter', $('filt0').checked);
+  return AN;
+}
+async function anLoad(x, p, gen) {                         // tune, subtune, model and video standard of the render
+  const an = anEnsure(); if (!an) return;
+  an.pause();
+  const buf = x.buf || x.bytes || (x.bytes = await (await fetch(x.url)).arrayBuffer());
+  if (gen !== R.gen) return;
+  an.load(buf, { sub: p.subtune - 1, model: p.model === 'auto' ? 'auto' : +p.model, video: p.video, length: p.length });
+}
+function rAgain() { if (!LIVE() && cur >= 0 && lib[cur]) rStart(lib[cur], +$('sub').value); }   // subtune / model / video / LEN changed: render again
+function setStatus(t) { R.status = t; $('rs_st').textContent = t; metaTxt = ''; }
+
+// the page's settings as sidrender parameters. bits: the 16-bit of playback, or the download format
+const RS = Object.assign({ engine: 'residfp', fcurve: null, frange: null, cw: null, digiboost: false, old_caps: false, bits: 16 }, store.get('rs', {}));
+function rparams(bits) {
+  const model = $('model').value, vid = $('vid').value, p = {
+    engine: RS.engine, model, model_force: model !== 'auto', video: vid, video_force: vid !== 'auto', subtune: +$('sub').value + 1, length: lenSec(),
+    mute: [0, 1, 2].filter(i => MUTE[i]).map(i => i + 1), filter: $('filt0').checked, digiboost: RS.digiboost,
+    fcurve: RS.fcurve, frange: RS.frange, cw: RS.cw, old_caps: RS.old_caps, bits: bits || 16 };
+  if (p.engine !== 'residfp') { p.fcurve = p.frange = p.cw = null; p.old_caps = false; }   // residfp only (sidrender ignores them too)
+  return p;
+}
+const RKEYS = ['engine', 'model', 'model_force', 'video', 'video_force', 'subtune', 'length', 'mute', 'filter', 'digiboost', 'fcurve', 'frange', 'cw', 'old_caps', 'bits'];
+const same = (a, b, keys) => keys.every(k => JSON.stringify(a[k]) === JSON.stringify(b[k]));
+const isDefault = p => same(p, { engine: 'residfp', model: 'auto', model_force: false, video: 'auto', video_force: false, length: 180, mute: [], filter: true,
+  digiboost: false, fcurve: null, frange: null, cw: null, old_caps: false, bits: 16 }, RKEYS.filter(k => k !== 'subtune'));
+const PEND = [['engine', 'engine'], ['mute', 'mute'], ['filter', 'filter'], ['digiboost', 'digiboost'], ['fcurve', 'curve'], ['frange', 'range'], ['cw', 'waveforms'], ['old_caps', 'caps']];
+function rsUI() {                                          // the render button shows what changed since the last render (mute, filter, panel settings)
+  const b = $('rs_render'); if (!b) return;
+  const diff = R.params ? PEND.filter(([k]) => !same(rparams(16), R.params, [k])).map(([, n]) => n) : [];
+  b.textContent = '⟳ render' + (diff.length ? ' · ' + diff.join(', ') : '');
+  b.classList.toggle('on', diff.length > 0 && !R.busy); b.disabled = R.busy; $('rs_dl').disabled = R.busy || cur < 0;
+  b.title = diff.length ? 'changed since the last render: ' + diff.join(', ') + ' - render again to hear it' : 'render the tune again with these settings';
+  const bv = v => v === '' ? null : v === 'auto' ? 'auto' : isFinite(+v) ? +v : v;           // value of a segment button
+  for (const k of ['curve', 'range', 'cw']) document.querySelectorAll('#rs_' + k + ' button').forEach(x => x.classList.toggle('on',
+    (k === 'curve' ? RS.fcurve : k === 'range' ? RS.frange : RS.cw) === bv(x.dataset.v)));
+  $('rs_curveN').value = typeof RS.fcurve === 'number' ? RS.fcurve : ''; $('rs_rangeN').value = typeof RS.frange === 'number' ? RS.frange : '';
+  $('rs_engine').value = RS.engine; $('rs_digi').checked = RS.digiboost; $('rs_caps').checked = RS.old_caps; $('rs_bits').value = String(RS.bits);
+  const fp = RS.engine === 'residfp', why = 'only for the reSIDfp engine';
+  for (const id of ['rg_curve', 'rg_range', 'rg_cw', 'rg_caps']) naSet($(id), !fp, why, true);
+  document.querySelectorAll('#rg_curve button, #rg_curve input, #rg_range button, #rg_range input, #rg_cw button, #rg_caps input').forEach(el => { el.disabled = !fp; });
+  document.querySelectorAll('[id^="mu"]').forEach(m => { m.title = LIVE() ? 'mute' : 'mute: needs a render again (⟳ render)'; });
+}
+function rsSave() { store.set('rs', RS); rsUI(); }
+document.querySelectorAll('#rs_curve button').forEach(b => b.onclick = () => { RS.fcurve = b.dataset.v === '' ? null : b.dataset.v === 'auto' ? 'auto' : +b.dataset.v; rsSave(); });
+document.querySelectorAll('#rs_range button').forEach(b => b.onclick = () => { RS.frange = b.dataset.v === '' ? null : 'auto'; rsSave(); });
+document.querySelectorAll('#rs_cw button').forEach(b => b.onclick = () => { RS.cw = b.dataset.v === '' ? null : b.dataset.v; rsSave(); });
+const numOrNull = id => { const v = $(id).value; if (v === '' || isNaN(+v)) return null; const n = Math.max(0, Math.min(1, +v)); return n === 0.5 ? null : Math.round(n * 1000) / 1000; };
+$('rs_curveN').onchange = () => { RS.fcurve = numOrNull('rs_curveN'); rsSave(); };
+$('rs_rangeN').onchange = () => { RS.frange = numOrNull('rs_rangeN'); rsSave(); };
+$('rs_engine').onchange = () => { RS.engine = $('rs_engine').value; rsSave(); };
+$('rs_digi').onchange = () => { RS.digiboost = $('rs_digi').checked; rsSave(); };
+$('rs_caps').onchange = () => { RS.old_caps = $('rs_caps').checked; rsSave(); };
+$('rs_bits').onchange = () => { RS.bits = +$('rs_bits').value; rsSave(); };
+$('rs_render').onclick = () => { if (cur >= 0) rStart(lib[cur], +$('sub').value); };
+$('rs_dl').onclick = () => rDownload();
+
+// a dropped file is sent to the local container: said once, before the first upload (kept in the browser; asked again only if it cannot be kept)
+let noticeOk = store.get('resid_notice', false) === true;
+function userNotice() {
+  if (noticeOk) return Promise.resolve(true);
+  $('modaltxt').textContent = 'reSID renders in your local Lab64 container: the file is sent to your local Lab64 container to be rendered with reSID; it does not leave this computer.';
+  $('modal').hidden = false; $('mok').focus();
+  return new Promise(res => {
+    const done = v => { $('modal').hidden = true; $('mok').onclick = $('mno').onclick = null; if (v) { noticeOk = true; store.set('resid_notice', true); } res(v); };
+    $('mok').onclick = () => done(true); $('mno').onclick = () => done(false);
+  });
+}
+function b64(buf) { const u = new Uint8Array(buf); let t = ''; for (let i = 0; i < u.length; i += 0x8000) t += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(t); }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// POST /render; waits (retries) while another render runs; returns the answer of the daemon
+async function renderReq(x, p, gen) {
+  const body = { params: p };
+  let src = null; try { src = decodeURIComponent(x.url).replace(/^out\//, ''); } catch (e) { /* odd name */ }
+  if (x.buf) { if (!await userNotice()) throw new Error('cancelled: the file was not sent'); body.sid_b64 = b64(x.buf); }
+  else if (src && /^[A-Za-z0-9._-][A-Za-z0-9._\/-]{0,199}\.sid$/i.test(src) && !src.split('/').includes('..') && /^out\//.test(x.url)) body.src = src;
+  else body.sid_b64 = b64(await (await fetch(x.url)).arrayBuffer());
+  for (let tries = 0; ; tries++) {
+    const r = await fetch('render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({ ok: false, error: 'HTTP ' + r.status }));
+    if (gen !== R.gen) throw new Error('superseded');
+    if (j.code === 'busy' && tries < 240) { await sleep(750); continue; }
+    if (!j.ok) throw new Error(j.error || 'render failed');
+    return j;
+  }
+}
+const mp3Url = (x, n) => { const st = x.url.replace(/\.sid$/i, ''); return x.songs > 1 ? st + '-' + n + '.mp3' : st + '.mp3'; };
+async function decodeUrl(url) {
+  const r = await fetch(url); if (!r.ok) throw new Error(url + ': HTTP ' + r.status);
+  return A.ctx.decodeAudioData(await r.arrayBuffer());
+}
+// render (or take the published MP3) and play
+async function rStart(x, sub0) {
+  const gen = ++R.gen, p = rparams(16), n = p.subtune;
+  R.kill(); playing = false; R.busy = true; R.t0 = performance.now(); ui();
+  const anP = anLoad(x, p, gen).catch(e => { $('err').textContent = 'analyzer: ' + (e.message || e); });      // meanwhile the render runs
+  const est = () => Math.max(1, p.length / R.speed);
+  clearInterval(R.timer);
+  R.timer = setInterval(() => { const e = (performance.now() - R.t0) / 1000; setStatus('rendering… ' + e.toFixed(0) + ' s' + (e < est() * 1.5 ? ' (~' + Math.min(95, Math.round(e / est() * 100)) + '%)' : '')); }, 250);
+  setStatus('rendering… 0 s'); rsUI();
+  try {
+    let buf, info = null, from = 'render';
+    if (!x.buf && isDefault(p) && MP3.has(mp3Url(x, n))) {          // a release tune with the default settings: its published MP3 (no render)
+      buf = await decodeUrl(mp3Url(x, n)); from = 'mp3';
+      info = { params: Object.assign({}, p, { start: 0, fade: 0 }), tune: { clock: x.clock || 'unknown' }, file: null, took: 0, cached: true };
+    } else {
+      const j = await renderReq(x, p, gen);
+      if (gen !== R.gen) return;
+      buf = await decodeUrl('out/' + j.file); info = j;
+      if (!j.cached && j.took > 0.3) R.speed = Math.max(2, j.seconds / j.took);
+    }
+    if (gen !== R.gen) return;
+    R.buf = buf; R.params = info.params; R.tune = info.tune; R.file = info.file; R.from = from;
+    await anP; if (gen !== R.gen) return;
+    R.pos = 0; R.start(0); playing = true; hist.reset(); CPU.max = 0;
+    setStatus(from === 'mp3' ? 'published MP3 · ' + fmt(buf.duration) : (info.cached ? 'cached' : 'rendered in ' + info.took.toFixed(1) + ' s (' + (info.seconds / info.took).toFixed(0) + 'x)') + ' · ' + fmt(buf.duration));
+  } catch (e) {
+    if (gen !== R.gen || String(e.message) === 'superseded') return;
+    setStatus(''); $('err').textContent = 'reSID: ' + (e.message || e); playing = false;
+  } finally {
+    if (gen === R.gen) { clearInterval(R.timer); R.busy = false; ui(); rsUI(); renderLib(); }
+  }
+}
+async function rDownload() {                                // the rendered WAV of the current settings (rendered first when needed)
+  const x = lib[cur]; if (!x || R.busy) return;
+  const p = rparams(RS.bits), gen = ++R.gen; let file = R.file;
+  if (!(R.file && R.params && same(R.params, p, RKEYS))) {
+    R.busy = true; R.t0 = performance.now(); setStatus('rendering the WAV… 0 s'); rsUI(); clearInterval(R.timer);
+    R.timer = setInterval(() => setStatus('rendering the WAV… ' + ((performance.now() - R.t0) / 1000).toFixed(0) + ' s'), 250);
+    try { file = (await renderReq(x, p, gen)).file; setStatus('WAV ready'); }
+    catch (e) { setStatus(''); $('err').textContent = 'reSID: ' + (e.message || e); file = null; }
+    finally { clearInterval(R.timer); R.busy = false; rsUI(); }
+    if (!file) return;
+  }
+  const a = document.createElement('a'); a.href = 'out/' + file;
+  a.download = ((x.name || 'sid') + '_' + p.subtune + '_' + (p.engine === 'residfp' ? 'resid' : p.engine) + '_' + (p.model === 'auto' ? 'auto' : p.model) + '_' + p.bits).replace(/[^\w.-]+/g, '_') + '.wav';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+// controls that need the live jsSID emulation are SHOWN GREYED, with the reason, while the source is reSID (the layout never changes)
+const WHY = {
+  solo: 'solo needs the live jsSID emulation (it would not change what is heard): with the reSID source use M (mute), which needs a new render',
+  sidf: 'the SID filter override changes the registers of the live jsSID emulation (it would not change what is heard): with the reSID source use the filter checkbox of the master strip and the reSID panel (curve, range)',
+  // (1.9) these are fed by the silent jsSID analyzer; greyed only where it cannot run
+  scope: 'per-voice scopes need a jsSID emulation: with the reSID source a silent analyzer feeds them, which needs AudioWorklet (secure context, no ?engine=script)',
+  env: 'envelopes need a jsSID emulation: with the reSID source a silent analyzer feeds them, which needs AudioWorklet (secure context, no ?engine=script)',
+  info: 'these values come from a jsSID emulation: with the reSID source a silent analyzer feeds them, which needs AudioWorklet (secure context, no ?engine=script)',
+  regs: 'the register table shows a jsSID emulation: with the reSID source a silent analyzer feeds it, which needs AudioWorklet (secure context, no ?engine=script)',
+  cpu: 'the player CPU meter measures a jsSID emulation: with the reSID source a silent analyzer feeds it, which needs AudioWorklet (secure context, no ?engine=script)',
+  roll: 'the piano roll is drawn from jsSID registers: with the reSID source a silent analyzer feeds it, which needs AudioWorklet (secure context, no ?engine=script)',
+  auto: 'the automation lanes are drawn from jsSID registers: with the reSID source a silent analyzer feeds them, which needs AudioWorklet (secure context, no ?engine=script)',
+  fcurve: 'the filter curve drawn here is the live jsSID filter: not available for the rendered sound',
+  xwav: 'reSID source: use ⇩ WAV in the reSID panel (the rendered file). This export renders with jsSID'
+};
+function naSet(el, on, why, noDisable) {
+  if (!el) return;
+  el.classList.toggle('na', on);
+  if (on) { if (el.dataset.t0 === undefined) el.dataset.t0 = el.getAttribute('title') || ''; el.title = why; }
+  else if (el.dataset.t0 !== undefined) { if (el.dataset.t0) el.title = el.dataset.t0; else el.removeAttribute('title'); delete el.dataset.t0; }
+  if (!noDisable && (el.tagName === 'BUTTON' || el.tagName === 'INPUT')) el.disabled = on;
+}
+function panelBody(id) { return [...document.querySelector(`.p[data-id="${id}"]`).children].filter(c => !c.classList.contains('ph') && !c.classList.contains('rz')); }
+function applyNA() {
+  const on = !LIVE(), an = on && ANAV(), off = on && !an, q = sel => [...document.querySelectorAll(sel)];      // an: the silent analyzer feeds the panels (1.9)
+  q('#so0, #so1, #so2').forEach(e => naSet(e, on, WHY.solo));
+  q('#ch0 canvas.sc, #ch1 canvas.sc, #ch2 canvas.sc').forEach(e => naSet(e, off, WHY.scope));
+  q('#ch0 canvas.env, #ch1 canvas.env, #ch2 canvas.env').forEach(e => naSet(e, off, WHY.env));
+  q('#kv0, #kv1, #kv2, #kv3').forEach(e => naSet(e, off, WHY.info));
+  [0, 1, 2].forEach(i => { $('bd' + i).hidden = !an; });
+  $('seekg').hidden = !on; $('abg').hidden = !an;
+  for (const [id, why, grey] of [['sidf', WHY.sidf, on], ['regs', WHY.regs, off], ['cpu', WHY.cpu, off], ['roll', WHY.roll, off], ['auto', WHY.auto, off]]) {
+    const pn = document.querySelector(`.p[data-id="${id}"]`);
+    panelBody(id).forEach(e => { naSet(e, grey, why); e.querySelectorAll && e.querySelectorAll('button, input').forEach(c => { c.disabled = grey; }); });
+    naSet(pn.querySelector('.ttl'), grey, why, true);
+  }
+  naSet($('fcurve').closest('label'), on, WHY.fcurve, true); $('fcurve').disabled = on;
+  naSet($('xwav'), on, WHY.xwav, true); $('xwav').disabled = on || !SIDEngine.offlineOk(); $('xlen').disabled = on || !SIDEngine.offlineOk();
+  if (!on) ovShow();
+}
+function showEngine() {
+  $('engine').textContent = LIVE() ? 'jsSID · ' + (player ? player.engine : (SIDEngine.workletOk() ? 'worklet' : 'script')) :
+    R.ab ? 'jsSID · analyzer (A/B)' : (RS.engine === 'residfp' ? 'reSIDfp' : 'sidlite') + ' · rendered';
+}
+// switch the audio source: jsSID is stopped for reSID and the other way round
+function applySource(first) {
+  const was = playing && cur >= 0;
+  if (!first) {
+    if (LIVE()) R.stop(); else { if (player) player.stop(); }
+    R.gen++; R.busy = false; clearInterval(R.timer); setStatus(''); playing = false;
+    if (LIVE()) { R.ab = false; if (AN) { AN.stop(); AN.setAudible(false, 1); } }       // the analyzer is only for the reSID source
+  }
+  $('asrc').value = SRCMODE; store.set('source', SRCMODE);
+  $('rspanel').hidden = LIVE();
+  $('dropnote').textContent = LIVE() ? 'they stay in this browser' : 'reSID: a dropped file is sent to your local Lab64 container to be rendered';
+  modelSel(); applyNA(); showEngine(); rsUI(); hist.reset(); lastReg.fill(-1); metaTxt = '';
+  if (!LIVE()) {
+    $('cpuv').textContent = '—'; $('cpukv').innerHTML = ''; document.querySelectorAll('[id^="r"]').forEach(td => { if (/^r\d+$/.test(td.id)) td.textContent = '--'; });
+    $('rdec').textContent = ''; ['kv0', 'kv1', 'kv2', 'kv3'].forEach(k => { $(k).textContent = ''; });
+  }
+  $('an_st').textContent = ''; abUI(); CPU.max = 0;
+  ui();
+  if (!first && was && lib[cur]) load(cur, +$('sub').value);       // it was playing: the same subtune, from the start, with the other source
+}
+$('asrc').onchange = () => { SRCMODE = $('asrc').value === 'resid' ? 'resid' : 'jssid'; applySource(false); };
+
+// ------------------------------------------------------------------ registers
+const RN = ['FREQ LO', 'FREQ HI', 'PW LO', 'PW HI', 'CTRL', 'AD', 'SR'];
+$('regs').innerHTML = '<tr><th></th>' + RN.map(n => `<th>${n}</th>`).join('') + '</tr>' +
+  [0, 1, 2].map(v => `<tr><th style="color:${VC[v]}">V${v + 1}</th>` + RN.map((_, k) => `<td class="v" id="r${v * 7 + k}">00</td>`).join('') + '</tr>').join('') +
+  `<tr><th>FILTER</th><th>FC LO</th><td class="v" id="r21">00</td><th>FC HI</th><td class="v" id="r22">00</td><th>RES/FILT</th><td class="v" id="r23">00</td></tr>` +
+  `<tr><th></th><th>MODE/VOL</th><td class="v" id="r24">00</td><th colspan="5" style="text-align:left" id="rdec"></th></tr>`;
+const lastReg = new Int16Array(25).fill(-1);
+
+// ------------------------------------------------------------------ SID filter override (14/11): every part follows the tune (AUTO) or is forced
+const OV = { lp: -1, bp: -1, hp: -1, r1: -1, r2: -1, r3: -1, v3off: -1, fc: -1, res: -1, vol: -1 };
+const TRI = [['mode', [['lp', 'LP'], ['bp', 'BP'], ['hp', 'HP']]], ['route', [['r1', 'V1'], ['r2', 'V2'], ['r3', 'V3']]], ['voice 3', [['v3off', 'V3 OFF']]]];
+const SLD = [['cutoff', 'fc', 2047], ['resonance', 'res', 15], ['volume', 'vol', 15]];
+const OVPRE = [
+  ['all auto', 'follow the tune', {}],
+  ['open lp', 'low-pass fully open on all voices', { lp: 1, bp: 0, hp: 0, r1: 1, r2: 1, r3: 1, fc: 2047, res: 0 }],
+  ['dark lp', 'low-pass at about 1.7 kHz, resonance 8', { lp: 1, bp: 0, hp: 0, r1: 1, r2: 1, r3: 1, fc: 300, res: 8 }],
+  ['phone bp', 'band-pass around 5 kHz (approx.), resonance 10', { lp: 0, bp: 1, hp: 0, r1: 1, r2: 1, r3: 1, fc: 900, res: 10 }],
+  ['thin hp', 'high-pass, resonance 4', { lp: 0, bp: 0, hp: 1, r1: 1, r2: 1, r3: 1, fc: 1200, res: 4 }],
+  ['no filter', 'no voice routed into the filter', { r1: 0, r2: 0, r3: 0 }],
+];
+$('ovr').innerHTML = TRI.map(([lab, list]) => `<span class="lab">${lab}</span><span class="row">` +
+    list.map(([k, t]) => `<button class="tri" data-k="${k}" data-t="${t}" title="click: auto (tune) → on → off">${t}</button>`).join('') + '</span>').join('') +
+  SLD.map(([lab, k, max]) => `<span class="lab">${lab}</span><span class="row"><button class="auto-t" data-s="${k}">AUTO</button>` +
+    `<input type="range" id="ov_${k}" min="0" max="${max}" value="0"><span class="val" id="ovv_${k}"></span></span>`).join('') +
+  `<span class="lab">presets</span><span class="row">${OVPRE.map(([n, t], i) => `<button class="ovp" data-i="${i}" title="${t}">${n}</button>`).join('')}</span>`;
+function ovSend() { if (player) player.setoverride(Object.assign({}, OV)); ovShow(); }
+function ovShow() {
+  document.querySelectorAll('#ovr .tri').forEach(b => { const v = OV[b.dataset.k]; b.classList.toggle('auto', v < 0); b.classList.toggle('force-on', v === 1); b.classList.toggle('force-off', v === 0);
+    b.textContent = b.dataset.t + (v === 1 ? ' ON' : v === 0 ? ' OFF' : ''); });
+  document.querySelectorAll('#ovr .auto-t').forEach(b => { const k = b.dataset.s, auto = OV[k] < 0; b.classList.toggle('on', auto); $('ov_' + k).disabled = auto; if (!auto) $('ov_' + k).value = OV[k]; });
+}
+document.querySelectorAll('#ovr .tri').forEach(b => b.onclick = () => { const k = b.dataset.k; OV[k] = OV[k] < 0 ? 1 : OV[k] === 1 ? 0 : -1; ovSend(); });
+document.querySelectorAll('#ovr .auto-t').forEach(b => b.onclick = () => { const k = b.dataset.s; OV[k] = OV[k] < 0 ? +$('ov_' + k).value : -1; ovSend(); });
+SLD.forEach(([, k]) => { $('ov_' + k).oninput = () => { OV[k] = +$('ov_' + k).value; ovSend(); }; });
+document.querySelectorAll('#ovr .ovp').forEach(b => b.onclick = () => { for (const k in OV) OV[k] = -1; Object.assign(OV, OVPRE[+b.dataset.i][2]); ovSend(); });
+function ovLive(T, F) {                                    // auto buttons light up where the tune sets the bit; sliders show the tune value in AUTO
+  const bits = { lp: T.mode & 1, bp: T.mode & 2, hp: T.mode & 4, r1: T.route & 1, r2: T.route & 2, r3: T.route & 4, v3off: T.v3off };
+  document.querySelectorAll('#ovr .tri').forEach(b => b.classList.toggle('live', !!bits[b.dataset.k]));
+  for (const [, k] of SLD) {
+    const tv = k === 'fc' ? T.fc : k === 'res' ? T.res : T.vol, ev = k === 'fc' ? F.fc : k === 'res' ? F.res : F.vol;
+    if (OV[k] < 0) $('ov_' + k).value = tv;
+    $('ovv_' + k).textContent = (k === 'fc' ? ev + ' ~' + Math.round(F.hz) + ' Hz' : String(ev)) + (OV[k] < 0 ? '' : ' (tune ' + tv + ')');
+  }
+}
+ovShow();
+
+// ------------------------------------------------------------------ layout of the desk (14/11): coarse grid, drag and drop, sizes, collapse
+// A panel is W columns (of 12) x H units (1 unit = 100 px = 5 grid rows of 20 px). Allowed sizes per panel, defaults first.
+const SIZES = {
+  vu:    { w: [4], h: [3], d: [4, 3] },                 // fixed
+  spec:  { w: [4, 6, 8, 12], h: [2, 3, 4], d: [6, 3] },
+  cpu:   { w: [2, 3, 4], h: [2, 3], d: [2, 3] },
+  ch0:   { w: [3, 4, 6], h: [3, 4, 5], d: [3, 3] }, ch1: { w: [3, 4, 6], h: [3, 4, 5], d: [3, 3] },
+  ch2:   { w: [3, 4, 6], h: [3, 4, 5], d: [3, 3] }, ch3: { w: [3, 4, 6], h: [3, 4, 5], d: [3, 3] },
+  roll:  { w: [6, 12], h: [2, 3, 4, 6], d: [12, 3] },
+  auto:  { w: [6, 12], h: [2, 3, 4], d: [6, 3] },
+  sgram: { w: [6, 12], h: [2, 3, 4], d: [6, 3] },
+  tone:  { w: [4, 6], h: [2], d: [6, 2] },
+  sidf:  { w: [4, 6, 8], h: [3, 4], d: [6, 3] },
+  regs:  { w: [6, 8, 12], h: [2, 3], d: [6, 2] },
+};
+const DEFAULT_ORDER = ['vu', 'spec', 'cpu', 'ch0', 'ch1', 'ch2', 'ch3', 'roll', 'auto', 'sgram', 'tone', 'sidf', 'regs'];
+const combos = id => { const S = SIZES[id], c = []; for (const h of S.h) for (const w of S.w) c.push([w, h]); return c.sort((a, b) => a[0] * a[1] - b[0] * b[1] || a[0] - b[0]); };
+function defaultLayout() { const L = { order: DEFAULT_ORDER.slice(), size: {}, collapsed: {} }; for (const id in SIZES) L.size[id] = SIZES[id].d.slice(); return L; }
+let LAY = (() => {                                        // stored layout, checked against the allowed sizes
+  const L = defaultLayout(), st = store.get('layout', null);
+  if (!st) return L;
+  if (Array.isArray(st.order) && st.order.length === DEFAULT_ORDER.length && DEFAULT_ORDER.every(id => st.order.includes(id))) L.order = st.order;
+  for (const id in SIZES) { const z = st.size && st.size[id]; if (z && SIZES[id].w.includes(z[0]) && SIZES[id].h.includes(z[1])) L.size[id] = z; }
+  L.collapsed = Object.assign({}, st.collapsed || {});
+  return L;
+})();
+const panel = id => document.querySelector(`.p[data-id="${id}"]`);
+function applyLayout() {
+  const desk = $('desk');
+  for (const id of LAY.order) desk.appendChild(panel(id));
+  for (const id of LAY.order) {
+    const el = panel(id), [w, h] = LAY.size[id], c = !!LAY.collapsed[id];
+    el.style.gridColumn = 'span ' + w; el.style.gridRow = 'span ' + (c ? 2 : 5 * h);
+    el.classList.toggle('collapsed', c);
+    el.querySelector('.sz').textContent = w + '×' + h;
+    el.querySelector('.col').textContent = c ? '▸' : '▾';
+  }
+  store.set('layout', LAY);
+}
+function setSize(id, wh) { LAY.size[id] = wh; LAY.collapsed[id] = false; applyLayout(); }
+document.querySelectorAll('.p').forEach(el => {             // header controls and resize corner on every panel
+  const id = el.dataset.id, ph = el.querySelector('.ph'), fixed = combos(id).length === 1;
+  ph.insertAdjacentHTML('afterbegin', '<span class="grip" draggable="true" title="drag to move">⠿</span>');
+  ph.insertAdjacentHTML('beforeend', `<button class="sz" title="size in columns × units: click = next, shift+click = previous"${fixed ? ' disabled' : ''}></button><button class="col" title="collapse / expand"></button>`);
+  if (fixed) el.classList.add('fixed'); else el.insertAdjacentHTML('beforeend', '<span class="rz" title="drag to resize (snaps to the allowed sizes)">◢</span>');
+  ph.querySelector('.sz').onclick = e => {
+    const c = combos(id), k = c.findIndex(([w, h]) => w === LAY.size[id][0] && h === LAY.size[id][1]);
+    setSize(id, c[(k + (e.shiftKey ? c.length - 1 : 1)) % c.length]);
+  };
+  ph.querySelector('.col').onclick = () => { LAY.collapsed[id] = !LAY.collapsed[id]; applyLayout(); };
+  // move: drag the grip, drop before or after another panel (left / right half)
+  const grip = ph.querySelector('.grip');
+  grip.addEventListener('dragstart', e => { e.dataTransfer.setData('text/x-lab64-panel', id); e.dataTransfer.effectAllowed = 'move'; el.classList.add('dragging'); });
+  grip.addEventListener('dragend', () => { el.classList.remove('dragging'); document.querySelectorAll('.p').forEach(p => p.classList.remove('drag-before', 'drag-after')); });
+  el.addEventListener('dragover', e => {
+    if (![...e.dataTransfer.types].includes('text/x-lab64-panel')) return;
+    e.preventDefault(); e.stopPropagation(); $('drop').classList.remove('over');
+    const r = el.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2;
+    el.classList.toggle('drag-after', after); el.classList.toggle('drag-before', !after);
+  });
+  el.addEventListener('dragleave', () => el.classList.remove('drag-before', 'drag-after'));
+  el.addEventListener('drop', e => {
+    const from = e.dataTransfer.getData('text/x-lab64-panel'); if (!from) return;
+    e.preventDefault(); e.stopPropagation();
+    const after = el.classList.contains('drag-after'); el.classList.remove('drag-before', 'drag-after');
+    if (from === id) return;
+    LAY.order.splice(LAY.order.indexOf(from), 1); LAY.order.splice(LAY.order.indexOf(id) + (after ? 1 : 0), 0, from); applyLayout();
+  });
+  // resize: drag the corner, the panel snaps to the nearest allowed width and height
+  const rz = el.querySelector('.rz'); if (!rz) return;
+  rz.addEventListener('pointerdown', e => {
+    e.preventDefault(); rz.setPointerCapture(e.pointerId);
+    const desk = $('desk').getBoundingClientRect(), colW = (desk.width + 10) / 12, top = el.getBoundingClientRect().top, left = el.getBoundingClientRect().left;
+    const near = (list, v) => list.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a);
+    const move = ev => {
+      const w = near(SIZES[id].w, Math.min(12, (ev.clientX - left + 10) / colW)), h = near(SIZES[id].h, (ev.clientY - top + 10) / 100);
+      if (w !== LAY.size[id][0] || h !== LAY.size[id][1]) setSize(id, [w, h]);
+      const lab = $('rzlab'); lab.style.display = 'block'; lab.style.left = ev.clientX + 14 + 'px'; lab.style.top = ev.clientY + 14 + 'px'; lab.textContent = w + ' × ' + h;
+    };
+    const up = () => { rz.removeEventListener('pointermove', move); rz.removeEventListener('pointerup', up); $('rzlab').style.display = 'none'; };
+    rz.addEventListener('pointermove', move); rz.addEventListener('pointerup', up);
+  });
+});
+$('resetv').onclick = () => { LAY = defaultLayout(); applyLayout(); };
+applyLayout();
+
+// ------------------------------------------------------------------ helpers
+function fit(cv) { const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1, w = Math.round(r.width * d), h = Math.round(r.height * d);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; } return d; }
+const WAVES = [[0x10, 'TRI'], [0x20, 'SAW'], [0x40, 'PUL'], [0x80, 'NOI']];
+const MODES = ['off', 'LP', 'BP', 'LP+BP', 'HP', 'LP+HP', 'BP+HP', 'LP+BP+HP'];
+let DS = null;                                             // source of registers, envelopes, scopes, cycles: the live jsSID, or (reSID source, 1.9) the analyzer
+const vclk = () => (DS && DS.getvideo ? DS.getvideo().clk : 985248);     // clock of the video standard in use
+function voice(M, v) {
+  const b = 0xD400 + 7 * v, c = M[b + 4], f = (M[b] + 256 * M[b + 1]) * vclk() / 16777216;
+  const nn = f > 8 ? 12 * Math.log2(f / 440) + 69 : null;
+  return { c, f, nn, pw: (M[b + 2] + 256 * (M[b + 3] & 15)) / 4095, ad: M[b + 5], sr: M[b + 6], wave: WAVES.filter(([m]) => c & m).map(([, n]) => n).join('+') || '—' };
+}
+function noteName(nn) { if (nn === null) return '—'; const i = Math.round(nn), ct = Math.round((nn - i) * 100);
+  return ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][((i % 12) + 12) % 12] + (Math.floor(i / 12) - 1) + (ct ? (ct > 0 ? ' +' : ' ') + ct + 'c' : ''); }
+function sidFilterR(R) {                                   // R = [$D415..$D418]; approximate cutoff in Hz (linear 30 Hz - 12 kHz, 8580-like), Q from resonance
+  const fc = (R[0] & 7) + 8 * R[1], res = R[2] >> 4, mode = (R[3] >> 4) & 7;
+  return { fc, hz: 30 + fc * (12000 - 30) / 2047, q: 0.707 + res * 0.12, res, mode, route: R[2] & 7, vol: R[3] & 15, v3off: R[3] >> 7 };
+}
+const sidFilter = M => sidFilterR([M[0xD415], M[0xD416], M[0xD417], M[0xD418]]);      // the tune's values
+const effFilter = () => sidFilterR(DS.geteff());                                  // what is really heard (after the override)
+
+// ------------------------------------------------------------------ history (piano roll, automation, cpu, envelopes): one entry per screen frame, 20 s
+// (the piano roll shows 10 s at 6 columns and 20 s at 12; the other graphs always the last 10 s, with more detail when wider)
+const at = (k, n) => (hist.i - n + k + 2 * hist.n) % hist.n;      // k-th of the last n entries
+const hist = { n: 1200, i: 0, note: [0, 1, 2].map(() => new Float32Array(1200)), env: [0, 1, 2].map(() => new Float32Array(1200)),
+  pw: [0, 1, 2].map(() => new Float32Array(1200)), fc: new Float32Array(1200), cpu: new Float32Array(1200),
+  reset() { this.i = 0; for (const a of [...this.note, ...this.env, ...this.pw, this.fc, this.cpu]) a.fill(NaN); } };
+hist.reset();
+
+// ------------------------------------------------------------------ drawing
+const BANDS = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000];
+const SPEC = { lvl: new Float32Array(31).fill(-120), pk: new Float32Array(31).fill(-120), pkt: new Float32Array(31), floor: -72, seg: 24, band: new Float32Array(31).fill(-120) };
+function bandsFromFFT() {
+  const bin = A.ctx.sampleRate / A.an.fftSize;
+  for (let i = 0; i < 31; i++) {
+    const lo = BANDS[i] / Math.pow(2, 1 / 6), hi = BANDS[i] * Math.pow(2, 1 / 6); let p = 0, n = 0;
+    for (let k = Math.max(1, Math.floor(lo / bin)); k <= Math.min(A.fft.length - 1, Math.ceil(hi / bin)); k++) { p += Math.pow(10, A.fft[k] / 10); n++; }
+    SPEC.band[i] = n ? 10 * Math.log10(p + 1e-12) : -120;
+  }
+}
+function drawSpectrum(dt, now, M) {
+  const cv = $('spec'), d = fit(cv), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  g.fillStyle = '#07080a'; g.fillRect(0, 0, W, H);
+  const padL = 30 * d, padB = 18 * d, bw = (W - padL - 4 * d) / 31, segH = (H - padB - 6 * d) / SPEC.seg;
+  g.font = `${10 * d}px DejaVu Sans Mono, monospace`; g.fillStyle = '#6d6a62'; g.textAlign = 'right';
+  for (const db of [0, -12, -24, -36, -48, -60, -72]) g.fillText(db, padL - 5 * d, 4 * d + (db / SPEC.floor) * (H - padB - 6 * d) + 3 * d);
+  g.textAlign = 'center';
+  for (let i = 0; i < 31; i++) {
+    const db = SPEC.band[i];
+    SPEC.lvl[i] = db > SPEC.lvl[i] ? db : Math.max(db, SPEC.lvl[i] - 24 * dt);
+    if (SPEC.lvl[i] >= SPEC.pk[i]) { SPEC.pk[i] = SPEC.lvl[i]; SPEC.pkt[i] = now; } else if (now - SPEC.pkt[i] > 1000) SPEC.pk[i] -= 12 * dt;
+    const x = padL + i * bw, lit = Math.round(Math.max(0, Math.min(1, 1 - SPEC.lvl[i] / SPEC.floor)) * SPEC.seg);
+    for (let s = 0; s < SPEC.seg; s++) {
+      const y = H - padB - (s + 1) * segH, fr = s / SPEC.seg, col = fr > 0.83 ? '255,60,40' : fr > 0.62 ? '255,196,40' : '70,230,110';
+      g.fillStyle = s < lit ? `rgb(${col})` : `rgba(${col},0.09)`; g.fillRect(x + bw * 0.12, y + segH * 0.18, bw * 0.76, segH * 0.64);
+    }
+    const pl = Math.round(Math.max(0, Math.min(1, 1 - SPEC.pk[i] / SPEC.floor)) * SPEC.seg);
+    if (pl > 0) { g.fillStyle = '#fff'; g.fillRect(x + bw * 0.12, H - padB - pl * segH + segH * 0.18, bw * 0.76, segH * 0.5); }
+    if ([31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000].includes(BANDS[i])) { g.fillStyle = '#8d897d'; g.fillText(BANDS[i] >= 1000 ? BANDS[i] / 1000 + 'k' : String(BANDS[i]), x + bw / 2, H - 5 * d); }
+  }
+  if ($('fcurve').checked && M) {                          // response of the SID filter as heard (approximate 2-pole model), 0 dB on the -12 dB line
+    const F = effFilter(); if (!F.mode) return;
+    g.strokeStyle = 'rgba(127,178,255,0.9)'; g.lineWidth = 2 * d; g.beginPath();
+    for (let px = 0; px <= W - padL; px += 2 * d) {
+      const f = 20 * Math.pow(2, (px / bw) / 3), r = f / F.hz, den = Math.sqrt(Math.pow(1 - r * r, 2) + Math.pow(r / F.q, 2));
+      let m = 0; if (F.mode & 1) m += 1 / den; if (F.mode & 2) m += (r / F.q) / den; if (F.mode & 4) m += (r * r) / den;
+      const db = 20 * Math.log10(m + 1e-6) - 12, y = 4 * d + (db / SPEC.floor) * (H - padB - 6 * d);
+      px ? g.lineTo(padL + px, y) : g.moveTo(padL + px, y);
+    }
+    g.stroke(); g.fillStyle = 'rgba(127,178,255,0.9)'; g.textAlign = 'left';
+    g.fillText(`SID filter ${MODES[F.mode]} ~${Math.round(F.hz)} Hz res ${F.res} (approx.)`, padL + 6 * d, 16 * d);
+  }
+}
+const VU = { x: 0, v: 0, wn: 13.5, z: 0.81, peakT: -1e9, ref: Math.pow(10, -18 / 20) };
+function vuAngle(volt) { const f = Math.min(1.09, Math.max(-0.03, volt / 1.413)); return (-48 + 96 * f) * Math.PI / 180; }
+function drawVU(dt, now) {
+  const cv = $('vu'), d = fit(cv), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  const n = Math.min(A.td.length, Math.max(64, Math.round(A.ctx.sampleRate * Math.max(dt, 0.016))));
+  let s = 0, pk = 0; for (let k = A.td.length - n; k < A.td.length; k++) { const a = Math.abs(A.td[k]); s += a; if (a > pk) pk = a; }
+  const u = (s / n) * 1.1107 / VU.ref;
+  for (let t = 0, h = 1 / 1000; t < dt; t += h) { const acc = VU.wn * VU.wn * (u - VU.x) - 2 * VU.z * VU.wn * VU.v; VU.v += acc * h; VU.x += VU.v * h; }
+  if (pk > Math.pow(10, -3 / 20)) VU.peakT = now;
+  $('vudb').textContent = (u > 1e-4 ? (20 * Math.log10(u)).toFixed(1) : '−∞') + ' VU';
+  const cx = W / 2, cy = H * 1.02, R = Math.min(W * 0.62, H * 0.92);
+  const bg = g.createRadialGradient(cx, H * 0.55, H * 0.1, cx, H * 0.55, W * 0.75); bg.addColorStop(0, '#fff3c8'); bg.addColorStop(0.7, '#f3dc9c'); bg.addColorStop(1, '#c9a96a');
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  const arc = (v0, v1, r, w, col) => { g.strokeStyle = col; g.lineWidth = w; g.beginPath(); g.arc(cx, cy, r, vuAngle(v0) - Math.PI / 2, vuAngle(v1) - Math.PI / 2); g.stroke(); };
+  arc(0.1, 1.0, R * 0.80, 2 * d, '#1a1610'); arc(1.0, 1.413, R * 0.80, 2 * d, '#b3140c'); arc(1.0, 1.413, R * 0.835, 7 * d, '#c8241a');
+  g.font = `${11 * d}px DejaVu Sans, sans-serif`; g.textAlign = 'center';
+  const tick = (vu, big, txt, red) => { const a = vuAngle(Math.pow(10, vu / 20)) - Math.PI / 2, r1 = R * 0.80, r2 = R * (big ? 0.885 : 0.85);
+    g.strokeStyle = red ? '#b3140c' : '#1a1610'; g.lineWidth = (big ? 2 : 1.2) * d; g.beginPath(); g.moveTo(cx + r1 * Math.cos(a), cy + r1 * Math.sin(a)); g.lineTo(cx + r2 * Math.cos(a), cy + r2 * Math.sin(a)); g.stroke();
+    if (txt) { g.fillStyle = red ? '#b3140c' : '#1a1610'; g.fillText(txt, cx + R * 0.95 * Math.cos(a), cy + R * 0.95 * Math.sin(a) + 4 * d); } };
+  [[-20, 1, '20'], [-10, 1, '10'], [-7, 1, '7'], [-5, 1, '5'], [-3, 1, '3'], [-2, 1, '2'], [-1, 1, '1'], [0, 1, '0', 1], [1, 1, '1', 1], [2, 1, '2', 1], [3, 1, '3', 1]].forEach(([v, b, t, r]) => tick(v, b, t, r));
+  for (const v of [-15, -8, -6, -4, -0.5, 0.5, 1.5, 2.5]) tick(v, 0, '', v > 0);
+  g.fillStyle = '#1a1610'; g.font = `${9 * d}px DejaVu Sans, sans-serif`;
+  for (const pc of [20, 40, 60, 80, 100]) { const a = vuAngle(pc / 100) - Math.PI / 2; g.fillText(pc, cx + R * 0.70 * Math.cos(a), cy + R * 0.70 * Math.sin(a) + 3 * d); }
+  g.font = `bold ${24 * d}px DejaVu Serif, Georgia, serif`; g.fillText('VU', cx, cy - R * 0.36);
+  const on = now - VU.peakT < 500; g.fillStyle = on ? '#ff2a14' : '#5a1810'; g.beginPath(); g.arc(W - 20 * d, 20 * d, 6 * d, 0, 7); g.fill();
+  if (on) { g.shadowColor = '#ff3a20'; g.shadowBlur = 14 * d; g.fill(); g.shadowBlur = 0; }
+  g.fillStyle = '#3a2e1a'; g.font = `${9 * d}px DejaVu Sans Mono, monospace`; g.fillText('PEAK', W - 20 * d, 38 * d);
+  const a = vuAngle(VU.x) - Math.PI / 2, nl = R * 0.93, base = R * 0.18;
+  const needle = (dx, dy, col, w) => { g.strokeStyle = col; g.lineWidth = w; g.beginPath(); g.moveTo(cx + dx + base * Math.cos(a), cy + dy + base * Math.sin(a)); g.lineTo(cx + dx + nl * Math.cos(a), cy + dy + nl * Math.sin(a)); g.stroke(); };
+  needle(4 * d, 5 * d, 'rgba(60,40,10,0.25)', 2.2 * d); needle(0, 0, '#111', 1.8 * d);
+  const cap = g.createLinearGradient(0, H - 46 * d, 0, H); cap.addColorStop(0, '#3a3530'); cap.addColorStop(1, '#0c0b0a');
+  g.fillStyle = cap; g.beginPath(); g.ellipse(cx, H, W * 0.22, 40 * d, 0, Math.PI, 2 * Math.PI); g.fill();
+  const gl = g.createLinearGradient(0, 0, 0, H * 0.6); gl.addColorStop(0, 'rgba(255,255,255,0.35)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gl; g.beginPath(); g.moveTo(0, 0); g.lineTo(W, 0); g.lineTo(W, H * 0.18); g.quadraticCurveTo(W / 2, H * 0.42, 0, H * 0.22); g.fill();
+}
+function drawScope(i, sc) {
+  const buf = i < 3 ? sc.v[i] : sc.m, cv = $('sc' + i), d = fit(cv), g = cv.getContext('2d'), W = cv.width, H = cv.height, N = 1200, S = sc.size;
+  let start = (sc.pos - N - 1 + 4 * S) % S;
+  for (let k = 1; k < S / 2 - N; k++) { const a = (sc.pos - N - k + 4 * S) % S; if (buf[(a - 1 + S) % S] < 0 && buf[a] >= 0) { start = a; break; } }
+  let peak = 1e-6; if (i === 3) for (let k = 0; k < N; k++) peak = Math.max(peak, Math.abs(buf[(start + k) % S]));
+  const sy = i < 3 ? 0.92 : 0.92 / peak;
+  g.fillStyle = '#05070a'; g.fillRect(0, 0, W, H);
+  g.strokeStyle = '#1b2a22'; g.lineWidth = 1; for (let k = 1; k < 8; k++) { g.beginPath(); g.moveTo(k * W / 8, 0); g.lineTo(k * W / 8, H); g.stroke(); }
+  g.beginPath(); g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
+  g.strokeStyle = VC[i]; g.lineWidth = 1.6 * d; g.shadowColor = VC[i]; g.shadowBlur = 6 * d; g.beginPath();
+  for (let k = 0; k < N; k++) { const x = k * W / (N - 1), y = H / 2 - buf[(start + k) % S] * sy * H / 2; k ? g.lineTo(x, y) : g.moveTo(x, y); }
+  g.stroke(); g.shadowBlur = 0;
+}
+function drawEnv(i, E) {
+  const cv = $('en' + i), d = fit(cv), g = cv.getContext('2d'), W = cv.width, H = cv.height, n = 600;
+  g.fillStyle = '#05070a'; g.fillRect(0, 0, W, H);
+  g.fillStyle = VC[i] + '55'; g.strokeStyle = VC[i]; g.lineWidth = 1.2 * d; g.beginPath(); g.moveTo(0, H);
+  for (let k = 0; k < n; k++) { const v = hist.env[i][at(k, n)]; g.lineTo(k * W / (n - 1), H - (isNaN(v) ? 0 : v) * (H - 4 * d)); }
+  g.lineTo(W, H); g.fill();
+  const st = E.st[i], ph = st & 0x80 ? 'ATTACK' : st & 0x40 ? 'DECAY / SUSTAIN' : (st & 1 ? 'SUSTAIN' : 'RELEASE');
+  g.fillStyle = '#cfc9b8'; g.font = `${9 * d}px DejaVu Sans Mono, monospace`; g.textAlign = 'left'; g.fillText('ENVELOPE ' + E.env[i] + ' · ' + ph, 4 * d, 11 * d);
+}
+function drawRoll() {
+  const n = Math.round(600 * Math.max(1, LAY.size.roll[0] / 6)); $('rollcap').textContent = 'piano roll · last ' + Math.round(n / 60) + ' s';
+  const cv = $('roll'), d = fit(cv), g = cv.getContext('2d'), W = cv.width, H = cv.height, lo = 24, hi = 108, kw = 34 * d, rh = H / (hi - lo);
+  g.fillStyle = '#0b0c0f'; g.fillRect(0, 0, W, H); g.textAlign = 'left';
+  for (let m = lo; m < hi; m++) {
+    const y = H - (m - lo + 1) * rh, black = [1, 3, 6, 8, 10].includes(m % 12);
+    g.fillStyle = black ? '#121318' : '#16181d'; g.fillRect(kw, y, W - kw, rh);
+    g.fillStyle = black ? '#1a1a1a' : '#e8e4d8'; g.fillRect(0, y, kw * (black ? 0.62 : 1), rh - 0.5);
+    if (m % 12 === 0) { g.fillStyle = '#2b2f37'; g.fillRect(kw, y + rh - 1, W - kw, 1); g.fillStyle = '#555'; g.font = `${Math.min(10 * d, rh * 1.6)}px DejaVu Sans Mono, monospace`; g.fillText('C' + (m / 12 - 1), kw + 3 * d, y + rh - 2); }
+  }
+  const cw = (W - kw) / n;
+  for (let v = 0; v < 3; v++) for (let k = 0; k < n; k++) {
+    const j = at(k, n), nn = hist.note[v][j], e = hist.env[v][j];
+    if (isNaN(nn) || !(e > 0.02)) continue;
+    g.fillStyle = VC[v]; g.globalAlpha = 0.25 + 0.75 * e;
+    g.fillRect(kw + k * cw, H - (nn - lo + 1) * rh, Math.ceil(cw) + 0.5, rh * 0.9);
+  }
+  g.globalAlpha = 1;
+}
+function drawAuto() {
+  const cv = $('auto'), d = fit(cv), g = cv.getContext('2d'), W = cv.width, H = cv.height, n = 600;
+  const lanes = [['PULSE WIDTH 1', hist.pw[0], VC[0]], ['PULSE WIDTH 2', hist.pw[1], VC[1]], ['PULSE WIDTH 3', hist.pw[2], VC[2]], ['FILTER CUTOFF', hist.fc, VC[3]]];
+  g.fillStyle = '#0b0c0f'; g.fillRect(0, 0, W, H);
+  const lh = H / lanes.length;
+  lanes.forEach(([name, a, col], li) => {
+    const y0 = li * lh; g.fillStyle = li % 2 ? '#101216' : '#0d0f12'; g.fillRect(0, y0, W, lh);
+    g.strokeStyle = col; g.lineWidth = 1.4 * d; g.beginPath(); let started = false;
+    for (let k = 0; k < n; k++) { const v = a[at(k, n)]; if (isNaN(v)) { started = false; continue; } const x = k * W / (n - 1), y = y0 + lh - 3 * d - v * (lh - 8 * d); started ? g.lineTo(x, y) : g.moveTo(x, y); started = true; }
+    g.stroke(); g.fillStyle = '#8b877d'; g.font = `${9 * d}px DejaVu Sans Mono, monospace`; g.textAlign = 'left'; g.fillText(name, 5 * d, y0 + 11 * d);
+  });
+}
+const INFERNO = [[0, 0, 4], [40, 11, 84], [101, 21, 110], [159, 42, 99], [212, 72, 66], [245, 125, 21], [250, 193, 39], [252, 255, 164]];   // colour map (dB -96..-6)
+function drawSgram() {
+  const cv = $('sgram'), d = fit(cv), g = cv.getContext('2d'), W = cv.width, H = cv.height, step = Math.max(1, Math.round(2 * d));
+  g.drawImage(cv, -step, 0);
+  for (let y = 0; y < H; y++) {
+    const fi = (1 - y / H) * 30, i0 = Math.floor(fi), t = fi - i0, db = SPEC.band[i0] * (1 - t) + SPEC.band[Math.min(30, i0 + 1)] * t;
+    const x = Math.max(0, Math.min(0.9999, (db + 96) / 90)) * (INFERNO.length - 1), i1 = Math.floor(x), f = x - i1, c0 = INFERNO[i1], c1 = INFERNO[i1 + 1];
+    g.fillStyle = `rgb(${c0.map((v, k) => Math.round(v + (c1[k] - v) * f))})`; g.fillRect(W - step, y, step, 1);
+  }
+}
+function blank(cv, txt) {
+  const d = fit(cv), g = cv.getContext('2d'); g.fillStyle = '#07080a'; g.fillRect(0, 0, cv.width, cv.height);
+  if (txt) { g.fillStyle = '#8b877d'; g.font = `${12 * d}px DejaVu Sans Mono, monospace`; g.textAlign = 'center'; g.fillText(txt, cv.width / 2, cv.height / 2 + 4 * d); }
+}
+// reSID: what the rendered sound gives (analyser): VU, spectrum, spectrogram, master scope; the panels of the analyzer are blank, or say
+// "analyzing…" while it loads or catches up after a seek
+function drawRendered(dt, now, analyzing) {
+  const on = id => !LAY.collapsed[id], t = analyzing ? 'analyzing…' : '';
+  if (on('vu')) drawVU(dt, now); if (on('spec')) drawSpectrum(dt, now, null); if (on('sgram')) drawSgram();
+  for (const id of ['cpu', 'roll', 'auto']) if (on(id)) blank($(id), t);
+  for (let i = 0; i < 3; i++) if (on('ch' + i)) { blank($('sc' + i), t); blank($('en' + i)); }
+  if (on('ch3')) drawScope(3, { v: [], m: A.td, pos: 0, size: A.td.length });
+  if (analyzing) {
+    ['kv0', 'kv1', 'kv2', 'kv3'].forEach(k => { if ($(k).textContent !== t) $(k).textContent = t; });
+    if ($('rdec').textContent !== t) $('rdec').textContent = t; $('cpuv').textContent = '—'; $('cpukv').innerHTML = '';
+  }
+}
+const CPU = { max: 0 };
+function drawCpu(cyc) {
+  const v = DS.getvideo(), ln = v.std === 'ntsc' ? 65 : 63, frc = v.frc || (v.std === 'ntsc' ? 17095 : 19656);      // cycles per raster line / per frame
+  const lines = cyc / ln, pct = cyc / frc * 100; CPU.max = Math.max(CPU.max, cyc);
+  $('cpuv').textContent = cyc ? lines.toFixed(1) + ' lines' : '—';
+  $('cpukv').innerHTML = `<span>cycles</span><span>${cyc}</span><span>frame</span><span>${pct.toFixed(1)} %</span><span>max</span><span>${CPU.max} (${(CPU.max / ln).toFixed(1)} l)</span>`;
+  const cv = $('cpu'), d = fit(cv), g = cv.getContext('2d'), W = cv.width, H = cv.height, n = 600;
+  g.fillStyle = '#0b0c0f'; g.fillRect(0, 0, W, H); g.fillStyle = '#7fb2ff';
+  const top = Math.max(1, CPU.max) * 1.2;
+  for (let k = 0; k < n; k++) { const v = hist.cpu[at(k, n)]; if (isNaN(v)) continue; const h = v / top * H; g.fillRect(k * W / n, H - h, Math.max(1, W / n), h); }
+}
+let lastT = performance.now();
+function draw() {
+  requestAnimationFrame(draw);
+  const now = performance.now(), dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+  if (!A.ctx || (LIVE() && !player)) return;
+  showMeta();
+  const live = LIVE(), rt = live ? 0 : R.time();
+  if (!seekDrag) $('time').textContent = fmt(live ? player.getplaytime() : rt) + (mode !== 'cont' ? ' / ' + $('len').value : '');
+  if (!live && !seekDrag && R.buf) $('seek').value = Math.round(rt / R.buf.duration * 1000);
+  A.an.getFloatFrequencyData(A.fft); A.an.getFloatTimeDomainData(A.td); bandsFromFFT();
+  if (!live && !(AN && AN.node)) return drawRendered(dt, now, false);       // no analyzer: the panels that need it stay blank (greyed)
+  if (!live) {
+    AN.pump(); abUI();
+    const st = AN.statusText(); if ($('an_st').textContent !== st) $('an_st').textContent = st;
+    if (!AN.locked) return drawRendered(dt, now, true);
+  }
+  DS = live ? player : AN.view;
+  const M = DS.getmem(), E = DS.getenv(), sc = DS.getscope(), cyc = DS.getcpu(), T = sidFilter(M), F = effFilter();
+  if (playing) {
+    const j = hist.i;
+    for (let v = 0; v < 3; v++) { const x = voice(M, v); hist.note[v][j] = x.nn === null ? NaN : x.nn; hist.env[v][j] = E.env[v] / 255; hist.pw[v][j] = x.c & 0x40 ? x.pw : NaN; }
+    hist.fc[j] = F.fc / 2047; hist.cpu[j] = cyc; hist.i = (j + 1) % hist.n;
+  }
+  const on = id => !LAY.collapsed[id];
+  if (on('vu')) drawVU(dt, now); if (on('spec')) drawSpectrum(dt, now, live ? M : null); if (on('cpu')) drawCpu(cyc);
+  if (on('roll')) drawRoll(); if (on('auto')) drawAuto(); if (on('sgram')) drawSgram();
+  for (let i = 0; i < 3; i++) if (on('ch' + i)) drawScope(i, sc);
+  if (on('ch3')) drawScope(3, live ? sc : { v: [], m: A.td, pos: 0, size: A.td.length });      // reSID: the master scope shows what is heard
+  for (let v = 0; v < 3; v++) {
+    if (on('ch' + v)) drawEnv(v, E); const x = voice(M, v);
+    $('kv' + v).innerHTML = `<span>wave</span><span>${x.wave}${x.c & 0x40 ? ' ' + Math.round(x.pw * 100) + '%' : ''}</span><span>note</span><span>${noteName(x.nn)} · ${x.f.toFixed(1)} Hz</span>` +
+      `<span>adsr</span><span>${(x.ad >> 4).toString(16)} ${(x.ad & 15).toString(16)} ${(x.sr >> 4).toString(16)} ${(x.sr & 15).toString(16)} · gate ${x.c & 1}</span>` +
+      `<span>route</span><span>${(F.route >> v) & 1 ? 'filter' : 'direct'}${x.c & 2 ? ' · sync' : ''}${x.c & 4 ? ' · ring' : ''}${x.c & 8 ? ' · test' : ''}</span>`;
+  }
+  $('kv3').innerHTML = `<span>mode</span><span>${MODES[F.mode]}</span><span>cutoff</span><span>${F.fc} (~${Math.round(F.hz)} Hz)</span>` +
+    `<span>reso</span><span>${F.res}</span><span>volume</span><span>${F.vol}${F.v3off ? ' · voice 3 off' : ''}</span>`;
+  for (let k = 0; k < 25; k++) {
+    const v = M[0xD400 + k], td = $('r' + k);
+    if (v !== lastReg[k]) { td.textContent = v.toString(16).padStart(2, '0').toUpperCase(); td.classList.add('chg'); lastReg[k] = v; setTimeout(() => td.classList.remove('chg'), 60); }
+  }
+  $('rdec').textContent = `tune: cutoff ${T.fc} · res ${T.res} · ${MODES[T.mode]} · vol ${T.vol}`;
+  if (live && on('sidf')) ovLive(T, F);
+}
+requestAnimationFrame(draw);
+
+// ------------------------------------------------------------------ start: the release music of ?src
+applySource(true);
+(async () => {
+  ui();
+  try {
+    if (src) {
+      const urls = /\.sid$/i.test(src) ? [src] : await listing(src.endsWith('/') ? src : src + '/');
+      if (/\.sid$/i.test(src)) listing(src.replace(/[^/]*$/, '')).catch(() => {});      // the published MP3s next to a single file
+      const grp = 'release ' + ((src.match(/v[\d.]+/) || [''])[0]);
+      for (const u of urls) await addUrl(u, grp.trim());
+    } else if (raw) $('err').textContent = 'refused: ' + raw + ' (only out/... of this viewer)';
+  } catch (e) { $('err').textContent = String(e.message || e); }
+  renderLib();
+})();
+</script>
+</body>
+</html>

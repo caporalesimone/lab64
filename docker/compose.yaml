@@ -1,0 +1,79 @@
+# Lab64 services (15/11): the compose stack of ONE project at a time. Copyright (c) 2026 - Simone Caporale
+# Started only by the command line (cli/lab64: lab64 up / view / down / ps), which sets the variables below:
+#   LAB64_DIR, LAB64_PROJECT (absolute host paths), LAB64_VER (image tag), LAB64_UID / LAB64_GID (host user), VIEW_*, C64_VIEW_*
+#   (from the project lab64.env or the environment: cli/lab64 dc() passes each of them).
+#   tools     lab64-tools always on (lab64 up): the commands run in it with "docker exec" instead of a new container each time
+#   vc64web   in-browser emulator daemon (EMU tests: http://lab64-vc64web:7064 on the lab64 network)
+#   viewer    http://localhost:6080: control center, live screen with audio (lab64 view)
+#   player    containers/tools/py/viewer_player.py, started with the viewer (1.8: always): renders .sid files for SID Studio; VICE on the viewer
+#             screen when the page asks ("play", "basic": only with C64_VIEW_PLAYER)
+# Network "lab64" and volume "lab64-x11" (screen and audio sockets) are created by the command line and shared with the
+# one-shot containers (docker run) used when tools is not up. No service gets the Docker socket.
+name: lab64
+
+x-project: &project
+  - ${LAB64_PROJECT:?}:/work
+  - ${LAB64_DIR:?}:/lab64:ro
+  - lab64-x11:/tmp/.X11-unix
+
+services:
+  tools:
+    image: lab64-tools:${LAB64_VER:?}
+    container_name: lab64-tools
+    command: ["sleep", "infinity"]
+    init: true
+    user: "${LAB64_UID:?}:${LAB64_GID:?}"
+    working_dir: /work
+    environment: {HOME: /work/out/tmp/home, LANG: C.UTF-8}
+    volumes: *project
+    networks: [lab64]
+    labels: {lab64.project: "${LAB64_PROJECT}"}
+
+  vc64web:
+    image: lab64-vc64web:${LAB64_VER:?}
+    container_name: lab64-vc64web
+    init: true
+    shm_size: 1g
+    networks: [lab64]
+
+  viewer:
+    image: lab64-viewer:${LAB64_VER:?}
+    container_name: lab64-viewer
+    restart: on-failure            # node exits on an unexpected error: start again (lab64 stop / down still stop it)
+    ports: ["127.0.0.1:${VIEW_PORT:-6080}:6080"]
+    environment:
+      VIEW_PASSWORD: ${VIEW_PASSWORD:-}
+      VIEW_HOSTS: ${VIEW_HOSTS:-}
+      VIEW_SIZE: ${VIEW_SIZE:-1280x1000}
+      VIEW_DISK: ${C64_VIEW_DISK:-}
+      VIEW_TITLE: ${C64_VIEW_TITLE:-}
+      VIEW_PLAYER: ${C64_VIEW_PLAYER:-}
+    volumes:
+      - lab64-x11:/tmp/.X11-unix
+      - ${LAB64_PROJECT:?}/out:/srv/out:ro
+    depends_on: [vc64web]          # (1.10) the portable page is in the lab64-vc64web image: the viewer shows it through c64d
+    networks: [lab64]
+    labels: {lab64.project: "${LAB64_PROJECT}"}
+
+  player:
+    image: lab64-tools:${LAB64_VER:?}
+    container_name: lab64-player
+    command: ["python3", "/lab64/containers/tools/py/viewer_player.py"]
+    init: true
+    user: "${LAB64_UID:?}:${LAB64_GID:?}"
+    working_dir: /work
+    environment:
+      HOME: /work/out/tmp/home
+      LANG: C.UTF-8
+      C64_VIEW: "1"
+      DISPLAY: ":99"
+      PULSE_SERVER: unix:/tmp/.X11-unix/pulse
+      C64_VIEW_PLAYER: ${C64_VIEW_PLAYER:-}
+    volumes: *project
+    network_mode: none             # (kept in 1.8, with render) only Unix sockets of lab64-x11 (screen :99, audio, player socket): no network, no "<project>_default"
+    depends_on: [viewer]
+
+networks:
+  lab64: {external: true}
+volumes:
+  lab64-x11: {external: true}

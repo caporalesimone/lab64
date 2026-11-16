@@ -1,0 +1,15 @@
+# Line endings (13/11): always LF in the repository and in the working copy, Windows too (the scripts run in Linux/Docker)
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+# binary files
+*.bin binary
+*.rom binary
+*.prg binary
+*.d64 binary
+*.zip binary
+*.png binary
+*.mp3 binary
+*.wasm binary
+*.ttf binary
+*.tar.gz binary

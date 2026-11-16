@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""lab64: the Lab64 command line, CONTAINER side (14/11). Copyright (c) 2026 - Simone Caporale
+
+Container side of the lab64 command (file lab64-worker): in the Lab64 images (lab64-tools, lab64-pdf-gen) it is linked as /usr/local/bin/lab64; the host command cli/lab64 starts it, and project scripts that run
+in those containers call it directly. Project in the current folder (/work), Lab64 in /lab64.
+  lab64 init [--name NAME] [--title TITLE] [--yes]   new project here: a ready-to-build skeleton (existing files are kept)
+  lab64 build                default build: 64tass src/main.asm -> out/work/main.prg (+ .lst, .lbl), cc1541 -> out/work/disk.d64,
+                             then lab64 publish
+  lab64 publish [args]       release folder out/releases/v<version>/ + manifest for the viewer (c64publish; --help)
+  lab64 test [args]          the test engine (containers/tools/test/run.py): [smoke|sanity|regression|all ...] [-k ID|prefix ...] [--list]
+  lab64 manual [args]        the manual (lab64-pdf-gen): C64_MANUAL of lab64.env if set (a command run here), else c64manual
+                             (source manual/manual.html, theme C64_MANUAL_THEME; lab64 manual --help)
+  lab64 map [args]           automatic memory and disk map (containers/tools/memmap/c64map.py; lab64 map --help); one map per program
+                             with C64_MAP_PROGRAM_<NAME> in lab64.env
+The host-only commands (view, up, images, ...) are not available here."""
+import os, re, subprocess, sys
+
+LAB64 = os.environ.get("LAB64") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.getcwd()
+VERSION = open(os.path.join(LAB64, "VERSION")).read().strip()
+for _d in ("common/py", "tools/py", "pdf-gen"):          # the Python library (the images also set PYTHONPATH)
+    sys.path.insert(0, os.path.join(LAB64, "containers", _d))
+from lab64env import setting  # noqa: E402  (containers/common/py/lab64env.py: the one reader of lab64.env)
+
+
+def write(path, text, mode=0o644):
+    p = os.path.join(ROOT, path)
+    if os.path.exists(p):
+        print("  kept     %s (exists)" % path); return
+    os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+    with open(p, "w") as f:
+        f.write(text)
+    os.chmod(p, mode)
+    print("  created  %s" % path)
+
+
+def ask(q, default, yes):
+    if yes or not sys.stdin.isatty():
+        return default
+    a = input("%s [%s]: " % (q, default)).strip()
+    return a or default
+
+
+def init(args):
+    yes = "--yes" in args
+    opt = lambda k, d: args[args.index(k) + 1] if k in args and args.index(k) + 1 < len(args) else d
+    folder = re.sub(r"[^a-z0-9]+", "-", os.path.basename(os.environ.get("C64_HOST_DIR", "")).lower()).strip("-") or "hello"
+    name = re.sub(r"[^a-z0-9]+", "", ask("Program name (disk file, lower case)", opt("--name", folder), yes).lower())[:16] or "hello"
+    title = ask("Title (viewer page, manual)", opt("--title", name.capitalize()), yes)
+    # the title goes into lab64.env, a sh file sourced by every lab64 command: no quote, $, backslash, backtick or line break
+    clean = re.sub(r"\s+", " ", re.sub(r'["$\\`]', "", title)).strip()[:80] or name.capitalize()
+    if clean != title:
+        print("lab64 init: title changed to '%s' (no \" $ \\ ` or line breaks: lab64.env is a sh file)" % clean)
+    title = clean
+    print("Lab64 %s: new project '%s' in the current folder" % (VERSION, name))
+    sub = dict(VERSION=VERSION, TITLE=title, NAME=name, UPPER=name.upper())
+    for path, text, *mode in SKELETON:
+        write(path, text.format(**sub) if "{" in text else text, *mode)
+    print("next: lab64 build && lab64 test     (then: lab64 view, lab64 manual)")
+
+
+def run(cmd):
+    print("  " + " ".join(cmd), flush=True)
+    r = subprocess.run(cmd)
+    if r.returncode:
+        sys.exit("lab64: failed (%d): %s" % (r.returncode, cmd[0]))
+
+
+def build(args):
+    name = setting("C64_NAME", "main")
+    out = os.path.join("out", "work")
+    os.makedirs(out, exist_ok=True)
+    if not os.path.isfile("src/main.asm"):
+        sys.exit("lab64 build: no src/main.asm (the default build); set C64_BUILD in lab64.env for an own build")
+    run(["64tass", "-C", "-a", "-B", "-q", "-I", "src", "-L", out + "/main.lst", "-l", out + "/main.lbl", "-o", out + "/main.prg",
+         "src/main.asm"])
+    if os.path.exists(out + "/disk.d64"):
+        os.remove(out + "/disk.d64")
+    run(["cc1541", "-n", name, "-f", name, "-w", out + "/main.prg", out + "/disk.d64"])
+    print("lab64 build: %s/main.prg, %s/disk.d64" % (out, out))
+    if "--no-publish" not in args:
+        publish([])
+
+
+def publish(args):
+    import c64publish
+    c64publish.main(args)
+
+
+def test(args):
+    os.execvp(sys.executable, [sys.executable, os.path.join(LAB64, "containers", "tools", "test", "run.py")] + args)
+
+
+def manual(args):
+    cmd = setting("C64_MANUAL")
+    if cmd:
+        os.execvp("sh", ["sh", "-c", cmd + ' "$@"', "lab64"] + args)
+    import c64manual
+    c64manual.main(args)
+
+
+def memmap(args):
+    os.execvp(sys.executable, [sys.executable, os.path.join(LAB64, "containers", "tools", "memmap", "c64map.py")] + args)
+
+
+# ------------------------------------------------------------------ project skeleton of "lab64 init"
+# (path, text[, mode]); in texts with "{" the fields {TITLE} {NAME} {UPPER} {VERSION} are filled ("{{" "}}" = braces)
+SKELETON = [
+    ("lab64.env", '''# Lab64 configuration of this project (read by the Lab64 commands started from this folder). sh syntax.
+# Lab64 version required (the commands stop if Lab64 is a different one)
+LAB64_VERSION="{VERSION}"
+# project name in the viewer page and disk proposed first by the viewer
+C64_VIEW_TITLE="{TITLE}"
+C64_VIEW_DISK="{NAME}_v*.d64"
+# version of the program: name of the release folder out/releases/v<version>/ (lab64 publish); versions kept
+C64_VERSION="0.1"
+C64_KEEP_VERSIONS="5"
+# disk name and program file name of the default build (lab64 build)
+C64_NAME="{NAME}"
+# duration caps of the tests in seconds (optional): one smoke / sanity test, smoke alone, smoke + sanity
+C64_TEST_CAPS="test=10 smoke=20 smoke+sanity=35"
+# manual (lab64 manual): source, theme loaded after the Lab64 base theme "c64", PDF name
+C64_MANUAL_SRC="manual/manual.html"
+C64_MANUAL_THEME="manual/theme.css"
+C64_MANUAL_PDF="{NAME}_manual.pdf"
+# own commands instead of the default ones, when the project grows:
+#   C64_BUILD="./build.sh"                         build (host command, run from this folder; it can call lab64 run ...)
+#   C64_TEST="..."                                 tests (host command; lab64 test --emu gives it C64_EMU=1)
+#   C64_MANUAL="python3 tools/manual.py"           manual (command run in lab64-pdf-gen; it can use c64manual.build)
+# host variables passed to the containers besides the standard ones (space separated names)
+#C64_PASS_ENV=""
+# memory map (lab64 map): with several programs on the disk that replace each other in memory, one line per program, main file
+# first, then the files it loads (disk file names, wildcards): one map each and an index. None = one map of everything.
+#C64_MAP_PROGRAM_MAIN="{NAME}"
+#C64_MAP_PROGRAM_TOOL="tool data*"
+# viewer (lab64 view): port on localhost, password of the whole viewer (none by default)
+#VIEW_PORT="6080"
+#VIEW_PASSWORD=""
+'''),
+    (".gitignore", "out/\n__pycache__/\n*.pyc\n"),
+    (".gitattributes", "* text=auto eol=lf\n*.prg binary\n*.d64 binary\n*.bin binary\n*.png binary\n*.pdf binary\n*.sid binary\n"),
+    ("README.md", '''# {TITLE}
+
+A Commodore 64 program built with Lab64 (assemble, test, emulate and analyze C64 programs).
+
+## Commands
+```
+lab64 build        # src/main.asm -> out/work/main.prg and out/work/disk.d64 (64tass, cc1541), published in out/releases/
+lab64 test         # smoke tests in VICE (tests/smoke/); lab64 test all --list shows every test
+lab64 view         # http://localhost:6080: disks, live screen with audio, memory map, SID player
+lab64 map          # memory and disk map: out/work/memory-map/index.html
+lab64 manual       # instruction manual: out/work/manual/{NAME}_manual.pdf
+lab64 run x64sc out/work/disk.d64    # any command in the Lab64 tools container (here: VICE, shown with lab64 play)
+```
+
+## Layout
+| Path | What |
+|---|---|
+| `src/main.asm` | program entry (BASIC line `SYS`, then `start`) |
+| `src/lib/` | routines included by `main.asm` (`screen.asm`: clear the screen, print a text) |
+| `data/` | data files included with `.binary` (graphics, music, tables) |
+| `tests/smoke/`, `tests/sanity/`, `tests/regression/` | tests: one folder per feature with a `cases.py` |
+| `manual/manual.html`, `manual/theme.css` | manual source (one `div.page` per A5 page) and its theme |
+| `lab64.env` | Lab64 settings of this project |
+| `out/` | everything generated (not in git) |
+'''),
+    ("src/main.asm", '''; {TITLE}: program entry. Started by "lab64 init". Assembler: 64tass (lab64 build).
+; BASIC line "2026 SYS <start>" at $0801: LOAD"{UPPER}",8 then RUN.
+        * = $0801
+        .word (+), 2026
+        .null $9e, format("%d", start)
++       .word 0
+
+;@map $0400..$07e8 "text screen (cls and print write it through pointers)"
+;@free $c000..$d000 "4 KB of RAM for more code and data" use=code
+; (memory-map annotations: lab64 map reads them; Lab64 docs/memory-maps.md)
+
+; start: border and background, clear the screen, the message on the first row; back to BASIC
+start   lda #COL_BORDER
+        sta $d020
+        lda #COL_BACK
+        sta $d021
+        jsr cls
+        lda #<message
+        ldx #>message
+        ldy #0                      ; row 0
+        jsr print
+        rts
+
+COL_BORDER = 14                     ; light blue
+COL_BACK   = 6                      ; blue
+
+        .include "lib/screen.asm"
+
+        .enc "screen"
+message .null "hello from lab64"    ; "screen" + lower case: screen codes 1..26 (upper case on the C64)
+        .enc "none"
+'''),
+    ("src/lib/screen.asm", '''; Screen routines (text screen at $0400, colour RAM at $d800).
+
+; cls: fills the screen with spaces and the colour RAM with COL_TEXT
+COL_TEXT = 1                        ; white
+cls     ldx #0
+-       lda #$20
+        sta $0400,x
+        sta $0500,x
+        sta $0600,x
+        sta $06e8,x
+        lda #COL_TEXT
+        sta $d800,x
+        sta $d900,x
+        sta $da00,x
+        sta $dae8,x
+        inx
+        bne -
+        rts
+
+; print: writes the zero-terminated text at A (low) / X (high) at the start of row Y (0..24), at most 40 characters
+print   sta $fb
+        stx $fc
+        lda #<$0400                 ; screen address of row Y: $0400 + 40 * Y
+        sta $fd
+        lda #>$0400
+        sta $fe
+_row    cpy #0
+        beq _go
+        lda $fd
+        clc
+        adc #40
+        sta $fd
+        bcc +
+        inc $fe
++       dey
+        jmp _row
+_go     ldy #0
+-       lda ($fb),y
+        beq +
+        sta ($fd),y
+        iny
+        cpy #40
+        bne -
++       rts
+'''),
+    ("data/README.md", "Data files of the program (graphics, music, tables), included from `src/` with `.binary \"../data/<file>\"`.\n"),
+    ("tests/smoke/hello/cases.py", '''"""Smoke test of the example program: it runs in VICE and writes its message on the screen."""
+from c64test import test, check
+from vicemon import Vice, labels, OUT
+
+
+@test("HELLO-01", "start writes HELLO FROM LAB64 at the top of the screen")
+def hello(ctx):
+    v = Vice()
+    try:
+        v.load(OUT + "/main.prg")
+        v.call(labels("main")["start"])
+        text = "hello from lab64"
+        want = [ord(c) - 96 if "a" <= c <= "z" else ord(c) for c in text]
+        check(v.mem(0x0400, len(text)) == want, "screen: %s" % v.mem(0x0400, len(text)))
+        check(v.mem(0x0400 + len(text), 1) == [0x20], "the rest of the row is not cleared")
+    finally:
+        v.close()
+'''),
+    ("tests/sanity/README.md", "Tests of the feature in development (one folder per feature with a `cases.py`); when the feature is done they move to `smoke/` or `regression/`.\n"),
+    ("tests/regression/README.md", "All the corner cases, as close as possible to the real program (slow tests too). One folder per feature with a `cases.py`.\n"),
+    ("manual/manual.html", '''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{TITLE} - Manual</title>
+</head>
+<!-- Manual source (lab64 manual). Every div.page is one A5 page; div.page.cover is the cover (not numbered). Style: the Lab64
+     base theme "c64" + theme.css. <kbd>X</kbd> becomes a key cap. Pictures: paths relative to this file (or to out/work/manual/
+     for pictures generated by the build). -->
+<body>
+
+<div class="page cover"><h1>{UPPER}</h1><div class="sub">INSTRUCTION MANUAL</div>
+<div class="sub" style="letter-spacing:6px">&#9830; &#9830; &#9830;</div>
+<div class="foot">for the<br><b>COMMODORE 64</b> + 1541 disk drive</div></div>
+
+<div class="page"><h1>1. LOADING</h1>
+<p>Insert the disk in the 1541, switch on the C64 and type:</p>
+<span class="cmd">LOAD"{UPPER}",8<br>RUN</span>
+<p>Press <kbd>RUN/STOP</kbd> + <kbd>RESTORE</kbd> to stop the program.</p>
+<h2>CONTROLS</h2>
+<table><tr><th>Action</th><th>Joystick (port 2)</th><th>Keyboard</th></tr>
+<tr><td>Move</td><td>stick</td><td><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></td></tr>
+<tr><td>Fire</td><td>button</td><td><kbd>SPACE</kbd></td></tr></table>
+<div class="note"><b class="t">NOTE</b>Write here what the player must know first.</div>
+</div>
+
+</body>
+</html>
+'''),
+    ("manual/theme.css", '''/* Theme of this manual, loaded AFTER the Lab64 base theme "c64" (/lab64/containers/pdf-gen/themes/c64.css: page, colours, cover, titles,
+   tables, figures, notes, keys). Change its variables here, add rules for your own elements, or replace whole rules.
+   C64_MANUAL_BASE="none" in lab64.env drops the base theme (this file is then the whole style). Examples: */
+:root {{
+  /* --accent: #1c4f8a;  --cover-bg: #10182a;  --cover-title: #7ab8f2;  --paper: #f5f1e6; */
+}}
+'''),
+]
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    cmds = {"init": init, "build": build, "publish": publish, "test": test, "manual": manual, "map": memmap}
+    if not a or a[0] not in cmds:
+        sys.exit(__doc__ if not a or a[0] in ("help", "-h", "--help") else
+                 "lab64 %s: a host command (run it on the host, not in a Lab64 container)\n" % a[0] + __doc__)
+    cmds[a[0]](a[1:])

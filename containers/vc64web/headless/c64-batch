@@ -1,0 +1,55 @@
+#!/usr/bin/env node
+// c64-batch: many runs of a runLoop cycle on several daemons in parallel (API 23).
+//   c64-batch --state FILE --loop FILE.js --runs N [-j J] [--frames F] [--every E] [--labels FILE.lbl]
+//             [--collect 'metodo arg...']... [--base-port 7100] [--keep]
+// Starts J c64d.js daemons on ports base..base+J-1 (or uses those already running on those ports); for every run k:
+//   loadState FILE, runLoop with 'const RUN=k;' at the top of the loop code, then the --collect calls and stateHash.
+// Prints a JSON on stdout: [{run, port, ms, frames, framesActual, exact, retriesCount, retries, hash, collect:{...}, error?}, ...]
+// The same RUN from the same state always gives the same result (exact steps): to explore, the loop uses RUN to vary the parameters.
+// Copyright (c) 2026 Simone Caporale
+const http = require('http'), fs = require('fs'), path = require('path'), { spawn } = require('child_process');
+const A = process.argv.slice(2); const opt = { j: 2, frames: 3000, every: 2, base: 7100, collect: [], keep: false };
+for (let i = 0; i < A.length; i++) {
+  const k = A[i], v = A[i + 1];
+  if (k === '-j') { opt.j = +v; i++; } else if (k === '--state') { opt.state = v; i++; } else if (k === '--loop') { opt.loop = v; i++; }
+  else if (k === '--runs') { opt.runs = +v; i++; } else if (k === '--frames') { opt.frames = +v; i++; } else if (k === '--every') { opt.every = +v; i++; }
+  else if (k === '--labels') { opt.labels = v; i++; } else if (k === '--collect') { opt.collect.push(v); i++; } else if (k === '--base-port') { opt.base = +v; i++; }
+  else if (k === '--keep') opt.keep = true;
+  else { console.error('unknown option: ' + k); process.exit(2); }
+}
+if (!opt.state || !opt.loop || !opt.runs) { console.error("usage: c64-batch --state FILE --loop FILE.js --runs N [-j J] [--frames F] [--every E] [--labels FILE.lbl] [--collect 'peek c_hp 2']... [--base-port 7100] [--keep]"); process.exit(2); }
+const conv = s => { if (s.startsWith('@@') && fs.existsSync(s.slice(2))) return fs.readFileSync(s.slice(2), 'utf8'); if (s.length > 1 && s[0] === '@' && fs.existsSync(s.slice(1))) return fs.readFileSync(s.slice(1)).toString('base64'); try { return JSON.parse(s); } catch (e) { return s; } };
+const req = (port, method, url, body) => new Promise((ok, ko) => {
+  const r = http.request({ host: '127.0.0.1', port, path: url, method, headers: { 'content-type': 'application/json' } }, res => { const c = []; res.on('data', d => c.push(d)); res.on('end', () => { try { ok(JSON.parse(Buffer.concat(c).toString())); } catch (e) { ko(e); } }); });
+  r.on('error', ko); if (body) r.write(JSON.stringify(body)); r.end();
+});
+const call = async (port, method, ...args) => { const r = await req(port, 'POST', '/call', { method, args }); if (!r.ok) { const e = new Error(r.error); e.code = r.code; throw e; } return r.value; };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const stateB64 = fs.readFileSync(opt.state).toString('base64'), code = fs.readFileSync(opt.loop, 'utf8'), lbl = opt.labels ? fs.readFileSync(opt.labels, 'utf8') : null;
+  const ports = [...Array(opt.j)].map((_, k) => opt.base + k), kids = [];
+  for (const p of ports) {
+    let up = false; try { await req(p, 'GET', '/ping'); up = true; } catch (e) {}
+    if (!up) { const ch = spawn(process.execPath, [path.join(__dirname, 'c64d.js'), '--port', String(p)], { stdio: 'ignore', env: process.env }); kids.push(ch); }
+  }
+  for (const p of ports) { const t0 = Date.now(); for (;;) { try { await req(p, 'GET', '/ping'); break; } catch (e) { if (Date.now() - t0 > 30000) { console.error('daemon on port ' + p + ' did not start'); process.exit(3); } await sleep(300); } } }
+  for (const p of ports) { await call(p, 'start', {}); await call(p, 'pause'); if (lbl) await call(p, 'loadLabels', lbl); }
+  const out = [], queue = [...Array(opt.runs).keys()];
+  const worker = async p => {
+    for (;;) {
+      const k = queue.shift(); if (k === undefined) return; const t0 = Date.now(), rec = { run: k, port: p };
+      try {
+        await call(p, 'loadState', stateB64);
+        const r = await call(p, 'runLoop', 'const RUN=' + k + ';\n' + code, { frames: opt.frames, every: opt.every });
+        Object.assign(rec, { frames: r.frames, framesActual: r.framesActual, exact: r.exact, retriesCount: r.retriesTotal !== undefined ? r.retriesTotal : (r.retries || []).reduce((a, x) => a + x[1], 0), retriesTruncated: !!r.retriesTruncated, retries: r.retries });
+        rec.collect = {}; for (const c of opt.collect) { const parts = c.match(/'[^']*'|"[^"]*"|\S+/g).map(x => /^'.*'$/.test(x) ? x.slice(1, -1) : x); rec.collect[c] = await call(p, parts[0], ...parts.slice(1).map(conv)); }
+        rec.hash = (await call(p, 'stateHash')).hash;
+      } catch (e) { rec.error = (e.code ? e.code + ': ' : '') + e.message; }
+      rec.ms = Date.now() - t0; out[k] = rec; process.stderr.write('run ' + k + ' (port ' + p + '): ' + (rec.error || rec.hash) + ' ' + rec.ms + ' ms\n');
+    }
+  };
+  await Promise.all(ports.map(worker));
+  if (!opt.keep) for (const p of ports) { try { await req(p, 'POST', '/quit'); } catch (e) {} }
+  console.log(JSON.stringify(out));
+  process.exit(out.some(r => r.error) ? 1 : 0);
+})().catch(e => { console.error(e.message); process.exit(1); });

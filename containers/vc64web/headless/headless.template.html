@@ -1,0 +1,60 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>VirtualC64 headless /*__VER__*/</title></head>
+<body style="margin:0;background:#000"><div id="screen" style="position:fixed;inset:0"></div>
+<script>
+/* Minimal page for remote control: only the emulator (vc64web in an iframe) and the minimum to start it. No interface.
+   The API (c64-api.js) is injected by the daemon. Copyright © 2026 Simone Caporale */
+const INNER  = /*__INNER__*/null;
+const ASSETS = /*__ASSETS__*/{};
+const APP_BUILD='/*__VER__*/';
+const st={port:2,running:false,paused:false,warp:false,disk:null,roms:{},injected:false,drvRom:'1541-II'};
+const _el={}, $=id=>_el[id]||(_el[id]={checked:id==='autoStart',value:'',dataset:{},textContent:'',style:{},classList:{toggle(){},add(){},remove(){}}});   // interface controls absent: values in memory
+const setPort=p=>{ st.port=p; }, savePrefs=()=>{}, msg=()=>{};
+function b64ToU8(b64){ const s=atob(b64), u=new Uint8Array(s.length); for(let i=0;i<s.length;i++) u[i]=s.charCodeAt(i); return u; }
+const DEFSEL={kernal:'901227-03',chargen:'901225-01'};   // headless: only the embedded standard ROMs; the others with loadRom()
+const rkey=k=>k==='floppy'?DRVROMS[st.drvRom||'1541-II']:k==='basic'?'rom_basic':'rom_'+k+'_'+DEFSEL[k];
+const DRVROMS={'1541-II':'rom_floppy','1541':'rom_floppy_1541'};
+function romB64(k){ const u=st.roms[k]; if(u&&u.b64) return u.b64; const a=ASSETS[rkey(k)]; return a?a.b:null; }
+let frame=null, pollT=null;
+function send(obj){ try{ frame.contentWindow.postMessage(obj,'*'); return true; }catch(e){ return false; } }
+function emu(code){ if(!st.running||!frame) return false; return send({cmd:'script', script:code}); }
+window.addEventListener('message', ev=>{
+  if(!frame || ev.source!==frame.contentWindow) return;
+  const d=ev.data||{};
+  if(d.msg==='render_run_state'){ st.paused=!d.value; st.warp=!!d.is_warping; if(!st.injected){ st.injected=true; inject(); } }
+});
+function launch(){
+  stopFrame();
+  const cfg={ navbar:false, wide:false, border:0.3, touch:false, dialog_on_disk:false, dialog_on_missing_roms:false };
+  cfg.openROMS = !['kernal','basic','chargen'].every(k=>!!romB64(k));
+  window.__EMU={ assets:ASSETS, href:'about:srcdoc#'+encodeURIComponent(JSON.stringify(cfg)) };
+  frame=document.createElement('iframe'); frame.setAttribute('allow','autoplay'); frame.style.cssText='border:0;width:100%;height:100%';
+  frame.srcdoc=INNER; document.getElementById('screen').appendChild(frame);
+  st.running=true; st.injected=false; st.paused=false; st.warp=false;
+  clearInterval(pollT); pollT=setInterval(()=>send('poll_state'),350);
+}
+function stopFrame(){ clearInterval(pollT); pollT=null; if(frame){ frame.remove(); frame=null; } }
+function stop(){ stopFrame(); st.running=false; }
+function inject(){
+  clearInterval(pollT); pollT=setInterval(()=>send('poll_state'),900);
+  const d={cmd:'load'}; let any=false;
+  const put=(k,key)=>{ const v=romB64(k); if(v){ d[key]=b64ToU8(v); any=true; } };
+  put('floppy','floppy_rom'); put('kernal','kernal_rom'); put('basic','basic_rom'); put('chargen','charset_rom');
+  if(st.disk){ d.file_name=st.disk.name; d.file=st.disk.bin; any=true; }
+  if(any) send(d);
+  if(st.disk) afterInsert();
+  if(st.once){ st.disk=null; st.once=false; }
+}
+/*__AFTERINSERT__*/
+function mountDisk(name,bin){
+  st.disk={ name, bin };
+  if(st.running && st.injected){ send({cmd:'load', file_name:name, file:bin}); afterInsert(); }
+  else if(!st.running){ launch(); }
+}
+/*__KT__*/
+function runTestPrg(){
+  const bin=buildKeyTestPrg();
+  if(st.running&&st.injected){ mountDisk('keytest.prg',bin); st.disk=null; }
+  else { st.once=true; mountDisk('keytest.prg',bin); }
+}
+</script></body></html>

@@ -1,0 +1,9 @@
+{
+  "name": "lab64-viewer",
+  "private": true,
+  "description": "Lab64 viewer server: control center page, KasmVNC client, PulseAudio audio (13/11)",
+  "dependencies": {
+    "pulseaudio2": "0.5.5",
+    "ws": "8.18.3"
+  }
+}

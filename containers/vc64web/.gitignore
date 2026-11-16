@@ -1,0 +1,11 @@
+# containers/vc64web: generated files and work folders (the ROMs are in Lab64 roms/: see roms/roms.md there)
+out/
+output/
+node_modules/
+*.zip
+__pycache__/
+*.pyc
+work/games/*
+!work/games/README.md
+work/roms/*
+!work/roms/README.md

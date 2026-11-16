@@ -1,0 +1,6 @@
+# Joystick port 2: up for 10 frames, then up+fire; reads the $DC00 register (bit at 0 = pressed).
+wait "READY." 10s
+0 JOY2-UP 10
+3 assert mem=0xDC00 0x1E &0x1F
+12 JOY2-UP&JOY2-FIRE 10
+15 assert mem=0xDC00 0x0E &0x1F

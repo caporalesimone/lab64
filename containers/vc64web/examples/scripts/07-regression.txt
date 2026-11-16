@@ -1,0 +1,11 @@
+# Baseline and comparison: same initial state (saveState/loadState) + same inputs = same result.
+# regress check exits with a REGRESS error if the state differs.
+wait "READY." 10s
+saveState start
+0 text "print 1\n"
+wait 60
+regress save after_print
+loadState start
+0 text "print 1\n"
+wait 60
+regress check after_print ignore=0x0400-0x07E7 ignore=0xD800-0xDBE7

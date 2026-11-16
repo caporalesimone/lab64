@@ -1,0 +1,769 @@
+<!doctype html>
+<!-- Copyright © 2026 Simone Caporale
+     Touch front-end (keyboard, joystick, Fire, commands) for vc64web.
+     It includes, in one file, the vc64web / VirtualC64 emulator (GPL-3.0):
+       https://github.com/vc64web/virtualc64web  ·  https://github.com/dirkwhoffmann/virtualc64
+     the Open-ROMs (https://github.com/MEGA65/open-roms) and the Commodore ROMs of VICE (C64 + 1541-II, personal/test use only, do not redistribute).
+     Since it contains GPL-3.0 code, redistribution of this file is subject to the GPL-3.0. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#111111">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>VirtualC64 /*__VER__*/</title>
+<style>
+:root{--red:#c2231d;--bd:#b9b9b9;--bg:#efefef;--ink:#222;--bar:38px}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;background:#111;color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%;overscroll-behavior:none}
+body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+button{font-family:inherit}
+
+/* ============ layout: PORTRAIT (default) ============ */
+#app{position:fixed;inset:0;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;background:#111;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+#bar{flex:none;height:var(--bar);display:flex;align-items:center;gap:4px;padding:0 6px;background:#1b1b1b;color:#ddd}
+#bar #status{flex:1;min-width:0;font-size:11px;color:#9a9a9a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 4px}
+.ib{flex:none;min-width:36px;height:30px;padding:0 6px;border:1px solid #444;border-radius:8px;background:#2a2a2a;color:#eee;font:600 15px/1 system-ui;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.ib.txt{font-size:12px}
+.ib:active{background:#555}
+.ib.on{background:#eee;color:#111;border-color:#eee}
+.ib.red.on{background:var(--red);color:#fff;border-color:var(--red)}
+
+#stage{flex:none;position:relative;width:100%;aspect-ratio:4/3;max-height:52dvh;background:#000;margin:0 auto;overflow:hidden}
+#screen,#screen iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block;background:#000}
+#drv{flex:none;display:flex;flex-direction:column;gap:2px;padding:5px 10px 4px;background:#111;opacity:.45;transition:opacity .3s}
+#drv[hidden]{display:none}#drv.act{opacity:1}
+#drvRow{display:flex;align-items:center;gap:8px}
+#drvLed{flex:none;width:14px;height:14px;border-radius:50%;background:#2b2f36;box-shadow:inset 0 0 0 1px #0008;transition:background .05s,box-shadow .05s}
+#drvLed.on{background:#2fe05a;box-shadow:0 0 8px 2px rgba(47,224,90,.6)}
+#drvBar{position:relative;flex:1;min-width:0;height:16px;border-radius:3px;background:#22262d;overflow:hidden}
+#drvCv{position:absolute;inset:0;width:100%;height:100%}
+#drvHead{position:absolute;top:0;bottom:0;width:3px;margin-left:-1.5px;background:#fff;box-shadow:0 0 5px rgba(255,255,255,.7);transition:left .12s linear}
+#drvLblRow{position:relative;height:13px;margin-left:22px}
+#drvTr{position:absolute;top:0;white-space:nowrap;font:600 11px/13px system-ui;color:#fff;transform:translateX(-50%);transition:left .12s linear}
+#startBtn{position:absolute;inset:0;margin:auto;width:70%;max-width:260px;height:56px;border:0;border-radius:12px;background:var(--red);color:#fff;font:700 17px system-ui;cursor:pointer;z-index:2}
+
+#controls{flex:none;position:relative;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:min(12px,1.6dvh) 12px;touch-action:none;background:#161616}
+#mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;max-width:150px;margin:0 auto}
+.qk{height:min(40px,6dvh);min-height:34px;border:1px solid #555;border-radius:10px;background:#2c2c2c;color:#eee;font:700 12px/1 system-ui;letter-spacing:.03em;touch-action:none;-webkit-tap-highlight-color:transparent;padding:0 4px}
+.qk.on{background:#eee;color:#111}
+
+#fireBtn{flex:none;width:min(28vw,118px,17dvh);height:min(28vw,118px,17dvh);border-radius:50%;border:5px solid #8f0f0b;padding:0;cursor:pointer;touch-action:none;outline:none;
+  background:radial-gradient(circle at 35% 30%,#ff6a5f 0,#e0201b 55%,#b81410 100%);box-shadow:0 5px 0 #6e0a07,0 8px 14px rgba(0,0,0,.4);
+  transition:transform .04s,box-shadow .04s;-webkit-tap-highlight-color:transparent;color:#fff;font:700 15px system-ui;letter-spacing:.08em}
+#fireBtn.on{transform:translateY(4px);box-shadow:0 1px 0 #6e0a07,0 2px 6px rgba(0,0,0,.4);filter:brightness(.88)}
+
+#dpad{--s:min(36vw,156px,22dvh);position:relative;flex:none;width:var(--s);height:var(--s);touch-action:none;-webkit-tap-highlight-color:transparent}
+#dpad{border-radius:50%;border:4px solid #7d7d7d;background:radial-gradient(circle at 50% 45%,rgba(230,230,230,.28) 0,rgba(150,150,150,.30) 70%,rgba(110,110,110,.38) 100%);box-shadow:inset 0 0 14px rgba(0,0,0,.45)}
+#dpad .knob{position:absolute;left:50%;top:50%;width:42%;height:42%;margin:-21% 0 0 -21%;border-radius:50%;border:4px solid #6d6d6d;pointer-events:none;
+  background:radial-gradient(circle at 38% 32%,#f4f4f4 0,#cfcfcf 55%,#a4a4a4 100%);box-shadow:0 3px 8px rgba(0,0,0,.5);transition:transform .08s ease-out;will-change:transform}
+#dpad.on .knob{transition:none;background:radial-gradient(circle at 38% 32%,#ffffff 0,#dedede 55%,#b4b4b4 100%)}
+#dpad .L.on::after{border-right-color:#fff}#dpad .R.on::after{border-left-color:#fff}
+
+/* C64 keyboard */
+#kbd{flex:none;display:none;background:#d9d3c4;border-top:1px solid #9d9784;padding:5px 4px calc(6px + env(safe-area-inset-bottom));flex-direction:column;gap:4px;touch-action:none}
+#app[data-kbd="1"] #kbd{display:flex}
+#app[data-kbd="1"] #stage{max-height:38dvh}
+#kbd{--kh:min(38px,5.4dvh)}
+.krow{display:flex;gap:3px;justify-content:center}
+.key{flex:1 1 0;min-width:0;height:var(--kh,38px);border:1px solid #6b6757;border-bottom-width:3px;border-radius:5px;background:#f2eee3;color:#222;
+  font:700 var(--kf,12px)/1 ui-monospace,Menlo,monospace;padding:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  cursor:pointer;touch-action:none;-webkit-tap-highlight-color:transparent;overflow:hidden}
+.key small{font-size:calc(var(--kf,12px)*.66);font-weight:600;color:#6b6757;margin-top:2px;line-height:1}
+.key.hit{background:#cfc9b6;transform:translateY(1px)}
+.key.mod{background:#c9c3b0}
+.key.mod.on{background:#222;color:#fff;border-color:#222}
+.key.s1{font-size:calc(var(--kf,12px)*.8)}.key.s2{font-size:calc(var(--kf,12px)*.68)}.key.s3{font-size:calc(var(--kf,12px)*.56)}
+.key.dark{background:#5b574a;color:#fff}.key.dark small{color:#d8d2bd}
+.key.w15{flex:1.5}.key.w2{flex:2}.key.w6{flex:6}
+
+/* ============ LANDSCAPE: full-height screen, controls in overlay ============ */
+@media (orientation:landscape){
+  #app{overflow:hidden;display:block}
+  #bar{position:absolute;top:0;left:0;right:0;z-index:20;padding-left:max(6px,env(safe-area-inset-left));padding-right:max(6px,env(safe-area-inset-right));padding-top:env(safe-area-inset-top);height:calc(var(--bar) + env(safe-area-inset-top))}
+  #drv{position:absolute;left:0;right:0;bottom:0;z-index:15}
+  #app:has(#drv:not([hidden])) #stage{bottom:36px}
+  #stage{position:absolute;left:0;right:0;bottom:0;top:calc(var(--bar) + env(safe-area-inset-top));width:auto;height:auto;aspect-ratio:auto;max-height:none}
+  #controls{position:absolute;inset:0;padding:0;background:none;pointer-events:none;z-index:10}
+  #controls>*{pointer-events:auto}
+  #dpad{--s:min(42vh,160px);position:absolute;right:max(14px,env(safe-area-inset-right));bottom:max(14px,env(safe-area-inset-bottom));opacity:.85}
+  #fireBtn{position:absolute;left:max(22px,env(safe-area-inset-left));bottom:max(26px,env(safe-area-inset-bottom));width:min(32vh,118px);height:min(32vh,118px);opacity:.82}
+  #mid{position:absolute;left:50%;bottom:max(10px,env(safe-area-inset-bottom));transform:translateX(-50%);flex-direction:row;max-width:none;margin:0;opacity:.85}
+  #mid .qk{width:78px;background:rgba(30,30,30,.8)}
+  #app[data-kbd="1"] #mid{display:none}
+  #app[data-kbd="1"] #stage{max-height:none}
+  #app[data-kbd="1"] #dpad{--s:min(32vh,124px)}
+  #app[data-kbd="1"] #fireBtn{width:min(24vh,92px);height:min(24vh,92px);bottom:max(18px,env(safe-area-inset-bottom))}
+  #kbd{--kh:min(7.4vh,34px);--kf:min(2.4vh,11px);position:absolute;z-index:15;bottom:0;left:50%;transform:translateX(-50%);
+    width:calc(100vw - 2*(min(32vh,124px) + 30px));min-width:340px;max-width:100vw;border:1px solid #9d9784;border-bottom:none;border-radius:10px 10px 0 0;
+    background:rgba(217,211,196,.93);padding:4px 4px 4px;gap:3px}
+  #kbd .krow{gap:2px}
+}
+
+/* ============ menu (panel) ============ */
+#sheet{position:fixed;z-index:100;inset:0;background:#fff;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) calc(20px + env(safe-area-inset-bottom)) env(safe-area-inset-left);user-select:none}
+#app[data-menu="1"] #sheet{display:block}
+@media (orientation:landscape){#sheet{inset:0 0 0 auto;width:min(560px,100%);box-shadow:-6px 0 24px rgba(0,0,0,.5)}}
+#sheet .in{max-width:560px;margin:0 auto;padding:0 12px 14px}
+#sheet header{position:sticky;top:0;display:flex;align-items:center;justify-content:space-between;background:#fff;padding:10px 0 6px;z-index:2}
+#sheet header b{font-size:16px}
+h4{margin:16px 0 6px;font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:#777;font-weight:600}
+.grid{display:grid;gap:8px}.g2{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+.cb{min-height:44px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--ink);font:600 13px/1.15 system-ui,sans-serif;padding:6px 4px;margin:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;text-align:center}
+.cb:active{background:#d6d6d6}
+.cb.on{background:#222;border-color:#222;color:#fff}
+input[type=file]{display:none}
+input[type=text]{width:100%;min-height:42px;border:1px solid var(--bd);border-radius:10px;padding:0 10px;font:14px ui-monospace,Menlo,monospace;background:#fff;color:var(--ink);-webkit-user-select:text;user-select:text}
+.row{display:flex;gap:8px}.row>*{flex:1}
+details{border:1px solid var(--bd);border-radius:10px;padding:6px 10px;margin-top:10px;background:#fafafa}
+summary{font-weight:600;font-size:13px;cursor:pointer;padding:6px 0}
+.sec{margin-top:10px;padding:2px 10px 10px}
+.sec>summary{font-size:14.5px;padding:10px 0}
+.sec[open]>summary{border-bottom:1px solid #e3e3e3;margin-bottom:8px}
+.sub{margin:12px 0 5px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#777;font-weight:600}
+
+.note{font-size:11.5px;color:#666;line-height:1.4;margin:6px 0}
+.fn{font-size:11px;color:#555;margin-top:4px;word-break:break-all}
+#msg{position:fixed;left:50%;top:calc(var(--bar) + 8px + env(safe-area-inset-top));transform:translateX(-50%);max-width:90vw;background:rgba(0,0,0,.82);color:#fff;font-size:12px;padding:7px 12px;border-radius:14px;z-index:200;display:none;pointer-events:none;text-align:center}
+code{background:#eee;border-radius:4px;padding:0 3px}
+
+</style>
+</head>
+<body>
+<div id="app" data-kbd="0" data-menu="0">
+
+  <div id="bar">
+    <button class="ib" id="bKbd" type="button" title="Show/hide keyboard" aria-label="Keyboard">⌨</button>
+    <button class="ib" id="bPause" type="button" title="Pause / resume" aria-label="Pause">⏸</button>
+    <button class="ib" id="bReset" type="button" title="Reset" aria-label="Reset">↺</button>
+    <button class="ib red" id="bWarp" type="button" title="Warp" aria-label="Warp">⚡</button>
+    <button class="ib" id="bAudio" type="button" title="Audio" aria-label="Audio">🔇</button>
+    <span id="status">stopped</span>
+    <button class="ib txt" id="bPort" type="button" title="Joystick port">J2</button>
+    <button class="ib" id="bFs" type="button" title="Full screen" aria-label="Full screen">⛶</button>
+    <button class="ib" id="bMenu" type="button" title="Menu" aria-label="Menu">☰</button>
+  </div>
+
+  <div id="stage"><div id="screen"></div><button id="startBtn" type="button">▶ Start emulator</button></div>
+  <div id="drv" hidden><div id="drvRow"><i id="drvLed"></i><div id="drvBar"><canvas id="drvCv"></canvas><b id="drvHead"></b></div></div><div id="drvLblRow"><span id="drvTr"></span></div></div>
+
+  <div id="controls">
+    <button id="fireBtn" type="button" aria-label="Fire">FIRE</button>
+    <div id="mid">
+      <button class="qk" type="button" data-code="runStop">RUN/STOP</button>
+      <button class="qk" type="button" data-code="Enter">RETURN</button>
+      <button class="qk" type="button" data-code="Space">SPACE</button>
+    </div>
+    <div id="dpad" role="group" aria-label="Directional stick"><div class="knob"></div></div>
+  </div>
+
+  <div id="kbd"></div>
+
+  <div id="sheet">
+    <div class="in">
+      <header><b>Menu</b><button class="ib" id="sClose" type="button" style="background:#eee;color:#111;border-color:#bbb" aria-label="Close">✕</button></header>
+
+      <details class="sec" open>
+        <summary>1 · Disk and programs</summary>
+        <div class="grid g2">
+          <label class="cb" for="diskFile">📁 Load disk / program</label>
+          <button type="button" class="cb" id="ejectBtn">⏏ Eject from drive</button>
+        </div>
+        <input id="diskFile" type="file" accept=".d64,.g64,.prg,.t64,.crt,.tap,.zip">
+        <div class="fn" id="diskName">No file selected</div>
+        <div class="sub">Quick commands</div>
+        <div class="grid g4">
+          <button type="button" class="cb" data-cmd='load"$",8'>LOAD "$"</button>
+          <button type="button" class="cb" data-cmd='list'>LIST</button>
+          <button type="button" class="cb" data-cmd='load"*",8,1'>LOAD "*",8,1</button>
+          <button type="button" class="cb" data-cmd='run'>RUN</button>
+        </div>
+        <div class="sub">Autostart</div>
+        <div class="grid g2">
+          <label class="cb" id="autoLbl"><input type="checkbox" id="autoStart" checked style="margin-right:6px"> Autoload + RUN</label>
+          <input type="text" id="prgName" placeholder="program name (empty = first)" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="note">After inserting, it types <code>LOAD"name*",8,1</code>, waits for the load to finish and does <code>RUN</code>.</div>
+      </details>
+
+      <details class="sec">
+        <summary>2 · Emulator control</summary>
+        <div class="grid g3">
+          <button type="button" class="cb" id="rsrBtn">RUN/STOP +RESTORE</button>
+          <button type="button" class="cb" id="relaunchBtn">↻ Restart everything</button>
+          <button type="button" class="cb" id="stopBtn">■ Power off</button>
+        </div>
+        <div class="grid g2" style="margin-top:8px">
+          <button type="button" class="cb" id="snapBtn">📸 Snapshot</button>
+          <button type="button" class="cb" id="advBtn">⚙ vc64web settings</button>
+        </div>
+        <div class="sub">Type text / script</div>
+        <div class="row">
+          <input type="text" id="typeTxt" placeholder='text to type, e.g. load"*",8,1' autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+          <button type="button" class="cb" id="typeBtn" style="flex:0 0 90px">Send</button>
+        </div>
+        <label class="cb" style="margin-top:6px"><input type="checkbox" id="typeEnter" checked style="margin-right:6px"> + Return</label>
+        <div class="row" style="margin-top:8px">
+          <input type="text" id="scriptTxt" placeholder="action script, e.g. j2fire1=>100ms=>j2fire0" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+          <button type="button" class="cb" id="scriptBtn" style="flex:0 0 90px">Run</button>
+        </div>
+        <div class="note">Script syntax: vc64web wiki, page <i>action_sequence_script</i>.</div>
+      </details>
+
+      <details class="sec">
+        <summary>3 · Joystick and keyboard</summary>
+        <div class="grid g2">
+          <button type="button" class="cb on" id="port2Btn">Joystick port 2</button>
+          <button type="button" class="cb" id="port1Btn">Joystick port 1</button>
+        </div>
+        <label class="cb" style="margin-top:8px"><input type="checkbox" id="kbJoy" style="margin-right:6px"> Physical keyboard → joystick (arrows + space)</label>
+        <div class="note">Only for a real keyboard: with the option on, SPACE becomes Fire and cannot be typed. Effective from the next start.</div>
+        <div class="sub">Test</div>
+        <button type="button" class="cb" id="testBtn" style="width:100%;background:#fff3f2;border-color:#c2231d">🧪 Key and joystick test (BASIC program)</button>
+        <div class="note">Restarts the C64 and draws the keyboard: the pressed key turns reversed, the keys already tested turn green. It includes left/right SHIFT, F1–F8 (F2/F4/F6/F8 = SHIFT+F1/F3/F5/F7), RESTORE and Stick/Fire of ports 1 and 2. It reacts within 1 frame (20 ms). To exit use Reset.</div>
+      </details>
+
+      <details class="sec">
+        <summary>4 · Memory (POKE / PEEK)</summary>
+      <div id="pokeBox">
+        <div class="note" style="margin-top:0">Usable at any time, also while the program runs.</div>
+        <div class="row" style="margin-top:6px">
+          <input type="text" id="pkAddr" placeholder="address ($D020, 53280)" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <input type="text" id="pkVal" placeholder="value (7, $07, 0x07)" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </div>
+        <div class="row" style="margin-top:6px">
+          <button type="button" class="cb" id="pkPoke">POKE</button>
+          <button type="button" class="cb" id="pkPeek">PEEK</button>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="pkRam" style="width:auto;min-height:0"> Plain RAM</label>
+        </div>
+        <div id="pkOut" style="margin-top:6px;font:13px ui-monospace,Menlo,monospace;min-height:1.2em"></div>
+      </div>
+      </details>
+
+      <details class="sec">
+        <summary>5 · ROMs and drive</summary>
+        <div class="note">The file embeds the VICE ROMs (C64 + 1541-II) for local testing. Here you can replace them with your own: they are saved in the browser and take precedence.</div>
+        <div class="grid g2">
+          <label class="cb" for="romFloppy">1541 (floppy)</label>
+          <label class="cb" for="romKernal">Kernal</label>
+          <label class="cb" for="romBasic">Basic</label>
+          <label class="cb" for="romChar">Chargen</label>
+        </div>
+        <input id="romFloppy" type="file" data-rom="floppy"><input id="romKernal" type="file" data-rom="kernal">
+        <input id="romBasic" type="file" data-rom="basic"><input id="romChar" type="file" data-rom="chargen">
+        <div class="note" style="margin-top:8px">Embedded drive ROM (effective from the next start). The core emulates only the 1541 family: 1541-II and 1541 are available.</div>
+        <div class="note" style="margin-top:8px">Embedded ROM variants (effective from the next start; ROMs loaded from file take precedence). Tested: all the Kernals boot; the 1540/1551/2031/1570/1571/1581 drives were removed because not compatible.</div>
+        <select id="selKernal" class="cb" style="width:100%;margin-top:6px"></select>
+        <select id="selChargen" class="cb" style="width:100%;margin-top:6px"></select>
+        <select id="drvRom" class="cb" style="width:100%;margin-top:6px"><option value="1541-II">1541-II (251968-03) — default</option><option value="1541">original 1541 (325302-01 + 901229-05)</option></select>
+        <div class="fn" id="romInfo"></div>
+        <button type="button" class="cb" id="romClear" style="margin-top:8px;width:100%">Remove user ROMs</button>
+      </details>
+
+      <div class="note" id="about" style="margin-top:16px"><b>VirtualC64 <span class="verTag"></span></b><br>Emulator: vc64web / VirtualC64 (GPL-3.0). Copyright © 2026 Simone Caporale (interface). Contains Commodore ROMs (from VICE): personal/test use only, do not redistribute.</div>
+    </div>
+  </div>
+</div>
+<div id="msg"></div>
+
+
+<script>
+/* ===================================================================
+   Embedded data (generated by build.py)
+   =================================================================== */
+const INNER  = /*__INNER__*/null;     // vc64web HTML document (string)
+const ASSETS = /*__ASSETS__*/{};      // name -> {t: mime, b: base64}
+
+/* ===================================================================
+   Utilities
+   =================================================================== */
+const $ = id => document.getElementById(id);
+const st = { port:2, running:false, paused:false, warp:false, audio:false, disk:null, roms:{}, mods:{shift:false,ctrl:false,cbm:false}, injected:false };
+const LSK='c64vc64web.single.v1';
+let msgT=null;
+function msg(t){ const m=$('msg'); m.textContent=t; m.style.display='block'; clearTimeout(msgT); msgT=setTimeout(()=>{m.style.display='none'},3500); }
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); return true; }catch(e){ return false; } }
+function b64ToU8(b64){ const s=atob(b64), u=new Uint8Array(s.length); for(let i=0;i<s.length;i++) u[i]=s.charCodeAt(i); return u; }
+function fileToB64(f){ return new Promise((ok,ko)=>{ const r=new FileReader(); r.onload=()=>ok(r.result.split(',')[1]); r.onerror=ko; r.readAsDataURL(f); }); }
+
+/* ===================================================================
+   Emulator: iframe (blob) + postMessage channel
+   =================================================================== */
+let frame=null, pollT=null;
+
+function send(obj){ try{ frame.contentWindow.postMessage(obj,'*'); return true; }catch(e){ return false; } }
+/* runs code in the emulator global context (same semantics as vc64web_player.exec) */
+function emu(code){
+  if(!st.running||!frame){ msg("Start the emulator first"); return false; }
+  return send({cmd:'script', script:code});
+}
+const act = s => emu('await action('+JSON.stringify(s)+');');
+
+window.addEventListener('message', ev=>{
+  if(!frame || ev.source!==frame.contentWindow) return;
+  const d=ev.data||{};
+  if(d.msg==='drive'){ drvEvent(d); return; }
+  if(d.msg==='render_run_state'){
+    st.paused = !d.value; st.warp=!!d.is_warping;
+    $('bPause').textContent = st.paused ? '▶' : '⏸'; $('bPause').classList.toggle('on',st.paused);
+    $('bWarp').classList.toggle('on',st.warp);
+    if(!st.injected){ st.injected=true; inject(); }
+  }else if(d.msg==='render_current_audio_state'){
+    st.audio = d.value==='running';
+    $('bAudio').textContent = st.audio ? '🔊' : '🔇'; $('bAudio').classList.toggle('on',st.audio);
+  }
+});
+
+// effective ROMs: those loaded by the user take precedence over the embedded ones (VICE)
+const APP_BUILD='/*__VER__*/';          // build = progressive number (vNN)
+const KERNALS={'901227-03':'901227-03 (standard, rev. 3) — predefinito','901227-02':'901227-02 (rev. 2)','901227-01':'901227-01 (rev. 1)','251104-04':'251104-04 (SX-64)','390852-01':'390852-01 (C64 Games System)','901246-01':'901246-01 (4064 / Educator)','906145-02':'906145-02 (variant, not identified)'};
+const CHARGENS={'901225-01':'901225-01 (standard) — predefinito','906143-02':'906143-02 (alternative set)'};
+const DEFSEL={kernal:'901227-03',chargen:'901225-01'};
+for(const k of Object.keys(KERNALS)) if(!ASSETS['rom_kernal_'+k]) delete KERNALS[k];     // only the embedded variants (the build lists those found in roms/)
+for(const k of Object.keys(CHARGENS)) if(!ASSETS['rom_chargen_'+k]) delete CHARGENS[k];
+const rkey=k=>k==='floppy'?DRVROMS[st.drvRom||'1541-II']:k==='basic'?'rom_basic':'rom_'+k+'_'+((st.sel&&st.sel[k])||DEFSEL[k]);
+const DRVROMS={'1541-II':'rom_floppy','1541':'rom_floppy_1541'};   // embedded drive ROMs: the core emulates only the 1541 family
+function romB64(k){ const u=st.roms[k]; if(u&&u.b64) return u.b64; const a=ASSETS[rkey(k)]; return a?a.b:null; }
+function romsComplete(){ return ['kernal','basic','chargen'].every(k=>!!romB64(k)); }
+function haveFloppy(){ return !!romB64('floppy'); }
+
+function launch(){
+  releaseAllInput();
+  stopFrame();
+  const cfg={ navbar:false, wide:false, border:0.3, touch:false, dialog_on_disk:false, dialog_on_missing_roms:false };
+  cfg.openROMS = !romsComplete();          // Open-ROMs incorporate, se mancano Kernal/Basic/Chargen
+  if($('kbJoy').checked) cfg['port'+st.port]=true;   // physical keyboard → joystick on that port (optional)
+  // the iframe (srcdoc, same origin) reads resources and configuration from window.parent.__EMU
+  window.__EMU={ assets:ASSETS, href:'about:srcdoc#'+encodeURIComponent(JSON.stringify(cfg)) };
+  frame=document.createElement('iframe');
+  frame.setAttribute('allow','autoplay; fullscreen; gamepad');
+  frame.srcdoc=INNER;
+  $('screen').appendChild(frame);
+  $('startBtn').style.display='none';
+  st.running=true; st.injected=false; st.paused=false; st.warp=false;
+  $('status').textContent='starting…';
+  clearInterval(pollT);
+  pollT=setInterval(()=>send('poll_state'), st.injected?900:350);
+  setTimeout(()=>{ if(st.running) $('status').textContent=statusText(); },2500);
+}
+function statusText(){ return (romsComplete()?(Object.keys(st.roms).length?'ROM originali (utente+VICE)':'ROM VICE'):'Open-ROMs')+(haveFloppy()?' · 1541':' · no 1541')+(st.disk?' · '+st.disk.name:''); }
+function stopFrame(){
+  clearInterval(pollT); pollT=null;
+  if(frame){ frame.remove(); frame=null; } drvReset();
+}
+function stop(){
+  releaseAllInput(); stopFrame(); st.running=false;
+  $('startBtn').style.display=''; $('status').textContent='stopped';
+}
+
+/* After the first "render_run_state": user ROMs + optional disk (same mechanism as the web player) */
+function inject(){
+  drvAttach();
+  clearInterval(pollT); pollT=setInterval(()=>send('poll_state'),900);
+  const d={cmd:'load'};
+  const R=st.roms; let any=false;
+  const put=(k,key)=>{ const v=romB64(k); if(v){ d[key]=b64ToU8(v); any=true; } };
+  put('floppy','floppy_rom'); put('kernal','kernal_rom'); put('basic','basic_rom'); put('chargen','charset_rom');
+  if(st.disk){ d.file_name=st.disk.name; d.file=st.disk.bin; any=true; }
+  if(any) send(d);
+  if(st.disk) afterInsert();
+  if(st.once){ st.disk=null; st.once=false; $('diskName').textContent='No file selected'; }
+  $('status').textContent=statusText();
+}
+function afterInsert(){
+  const n=st.disk.name;
+  const sl="const sl=ms=>new Promise(r=>setTimeout(r,ms));";
+  let script=null;
+  if(/\.(prg|t64)$/i.test(n)){
+    // the program is loaded after a reset: wait for the prompt and type RUN
+    script=sl+"await sl(400);await wasm_ready_after_reset();await sl(900);wasm_auto_type('run:\\n');";
+  }else if(/\.(d64|g64)$/i.test(n) && $('autoStart').checked){
+    const prg=$('prgName').value.trim().replace(/["\\]/g,'');
+    script=sl+
+      "for(let i=0;i<200&&!wasm_has_disk('drive8');i++) await sl(100);"+
+      "await wasm_ready_after_reset();"+
+      "wasm_poke(0xD4,0);wasm_poke(0xD8,0);"+          // leaves any quote/insert mode
+      "wasm_auto_type("+JSON.stringify('load"'+prg+'*",8,1:\n')+");"+
+      "await disk_loading_finished();"+
+      "wasm_auto_type('\\nrun:\\n');";
+  }
+  if(script){ setTimeout(()=>emu(script),400); }
+}
+
+/*KT<<*/
+/* ===================================================================
+   Key/joystick test program (BASIC, tokenized here in JS)
+   Draws the C64 keyboard: pressed key = reversed, already tested = green.
+   Reads: $C5 (197) current key, $028D (653) SHIFT/C=/CTRL, $DC00/$DC01 joystick.
+   =================================================================== */
+const KT_KEYS=[ // [$C5 code, x, y, label]   (code = row*8+column of the 6526 matrix)
+ [57,1,3,'←'],[56,3,3,'1'],[59,5,3,'2'],[8,7,3,'3'],[11,9,3,'4'],[16,11,3,'5'],[19,13,3,'6'],[24,15,3,'7'],[27,17,3,'8'],[32,19,3,'9'],[35,21,3,'0'],[40,23,3,'+'],[43,25,3,'-'],[48,27,3,'£'],[51,29,3,'HOME'],[0,34,3,'DEL'],
+ [58,0,5,'CTRL'],[62,5,5,'Q'],[9,7,5,'W'],[14,9,5,'E'],[17,11,5,'R'],[22,13,5,'T'],[25,15,5,'Y'],[30,17,5,'U'],[33,19,5,'I'],[38,21,5,'O'],[41,23,5,'P'],[46,25,5,'@'],[49,27,5,'*'],[54,29,5,'↑'],[74,33,5,'RST'],
+ [63,0,7,'STOP'],[10,5,7,'A'],[13,7,7,'S'],[18,9,7,'D'],[21,11,7,'F'],[26,13,7,'G'],[29,15,7,'H'],[34,17,7,'J'],[37,19,7,'K'],[42,21,7,'L'],[45,23,7,':'],[50,25,7,';'],[53,27,7,'='],[1,30,7,'RETURN'],
+ [61,0,9,'C='],[15,3,9,'SHFT'],[12,8,9,'Z'],[23,10,9,'X'],[20,12,9,'C'],[31,14,9,'V'],[28,16,9,'B'],[39,18,9,'N'],[36,20,9,'M'],[47,22,9,','],[44,24,9,'.'],[55,26,9,'/'],[52,28,9,'SHFT'],[7,33,9,'CD'],[2,36,9,'CR'],
+ [4,0,11,'F1'],[5,3,11,'F3'],[60,7,11,'    SPACE     '],[6,24,11,'F5'],[3,28,11,'F7'],
+ [75,0,12,'F2'],[76,3,12,'F4'],[77,24,12,'F6'],[78,28,12,'F8'],
+ [64,2,15,'UP'],[65,6,15,'DN'],[66,10,15,'LF'],[67,14,15,'RT'],[68,18,15,'FIRE'],
+ [69,2,18,'UP'],[70,6,18,'DN'],[71,10,18,'LF'],[72,14,18,'RT'],[73,18,18,'FIRE']
+];
+const BAS_KW=['END','FOR','NEXT','DATA','INPUT#','INPUT','DIM','READ','LET','GOTO','RUN','IF','RESTORE','GOSUB','RETURN','REM','STOP','ON','WAIT','LOAD','SAVE','VERIFY','DEF','POKE','PRINT#','PRINT','CONT','LIST','CLR','CMD','SYS','OPEN','CLOSE','GET','NEW','TAB(','TO','FN','SPC(','THEN','NOT','STEP','+','-','*','/','^','AND','OR','>','=','<','SGN','INT','ABS','USR','FRE','POS','SQR','RND','LOG','EXP','COS','SIN','TAN','ATN','PEEK','LEN','STR$','VAL','ASC','CHR$','LEFT$','RIGHT$','MID$','GO'];
+const BAS_SORTED=BAS_KW.map((k,i)=>[k,128+i]).sort((a,b)=>b[0].length-a[0].length);
+const PET={'£':92,'←':95,'↑':94};
+function petByte(ch){ return PET[ch]!==undefined?PET[ch]:ch.charCodeAt(0); }
+function basTokenize(src){            // text of a line -> bytes (keywords as tokens, strings/REM/DATA raw)
+  const out=[]; let i=0, q=false;
+  while(i<src.length){
+    const ch=src[i];
+    if(q){ out.push(petByte(ch)); if(ch==='"') q=false; i++; continue; }
+    if(ch==='"'){ q=true; out.push(34); i++; continue; }
+    let hit=null;
+    for(const [k,t] of BAS_SORTED){ if(src.startsWith(k,i)){ hit=[k,t]; break; } }
+    if(hit){
+      out.push(hit[1]); i+=hit[0].length;
+      if(hit[0]==='REM'||hit[0]==='DATA'){ for(;i<src.length;i++){ out.push(petByte(src[i])); } }
+      continue;
+    }
+    out.push(petByte(ch)); i++;
+  }
+  return out;
+}
+function basProgram(lines,start=0x0801){   // [[number,text],...] -> PRG
+  const body=[]; let addr=start;
+  for(const [n,t] of lines){
+    const tok=basTokenize(t), len=2+2+tok.length+1, next=addr+len;
+    body.push(next&255,next>>8,n&255,n>>8,...tok,0); addr=next;
+  }
+  body.push(0,0);
+  return Uint8Array.from([start&255,start>>8,...body]);
+}
+// Key test: the PRG contains a small BASIC program (status "LAST/EVENTS") and, from $0A00, a machine-language blob
+// that copies at once the screen image, the tables and the IRQ/NMI routine ($C000) and installs it.
+// The routine scans keyboard matrix and joysticks at every IRQ: latency = 1 frame. The blob is generated by asm/mkblob.py.
+const KT_BLOB=/*__KTBLOB__*/null;
+function buildKeyTestPrg(){
+  const L=[];
+  L.push([10,'SYS '+KT_BLOB.base]);
+  L.push([20,'OE=PEEK(50682):NC=0']);
+  L.push([30,'E=PEEK(50682):IF E=OE THEN 30']);
+  L.push([40,'D=E-OE:IF D<0 THEN D=D+256']);
+  L.push([50,'NC=NC+D:OE=E:I=PEEK(50681)-1:AD=PEEK(50176+I)+256*PEEK(50256+I):N=PEEK(50336+I)']);
+  L.push([60,'FOR Q=0 TO 13:C=32:IF Q<N THEN C=PEEK(AD+Q) AND 127']);
+  L.push([70,'POKE 1024+21*40+8+Q,C:NEXT Q']);
+  L.push([80,'POKE 781,21:POKE 782,24:POKE 783,0:SYS 65520:PRINT "COD";I;"  ";']);
+  L.push([82,'IF I>=69 THEN PRINT "J1 ";']);
+  L.push([83,'IF I>=64 AND I<69 THEN PRINT "J2 ";']);
+  L.push([85,'POKE 781,22:POKE 782,8:POKE 783,0:SYS 65520:PRINT NC;"    ";:GOTO 30']);
+  const bas=basProgram(L), off=KT_BLOB.base-0x0801+2;
+  if(bas.length>off) throw new Error('test BASIC program too long');
+  const out=new Uint8Array(off+KT_BLOB.bytes.length); out.set(bas,0); out.set(KT_BLOB.bytes,off); return out;
+}
+/*>>KT*/
+function runTestPrg(){
+  const bin=buildKeyTestPrg();
+  if(st.running&&st.injected){ mountDisk('keytest.prg',bin); st.disk=null; $('diskName').textContent='No file selected'; }
+  else { st.once=true; mountDisk('keytest.prg',bin); }
+}
+$('testBtn').onclick=()=>{ runTestPrg(); closeMenu(); };
+
+$('startBtn').onclick=launch;
+$('relaunchBtn').onclick=()=>{ launch(); closeMenu(); };
+$('stopBtn').onclick=()=>{ stop(); closeMenu(); };
+
+/* ===================================================================
+   ROM / disk
+   =================================================================== */
+function loadPrefs(){
+  try{ const o=JSON.parse(lsGet(LSK)||'{}'); st.roms=o.roms||{}; if(o.drvRom&&DRVROMS[o.drvRom]) st.drvRom=o.drvRom; st.sel={}; if(o.sel){ if(KERNALS[o.sel.kernal]) st.sel.kernal=o.sel.kernal; if(CHARGENS[o.sel.chargen]) st.sel.chargen=o.sel.chargen; } if(o.port) st.port=o.port; $('autoStart').checked=(o.auto===undefined)?true:!!o.auto; if(o.kbJoy) $('kbJoy').checked=true; if(o.prg) $('prgName').value=o.prg; if(o.kbd!==undefined&&o.kbd!==null) setKbd(!!o.kbd); }catch(e){}
+}
+function savePrefs(){
+  const ok=lsSet(LSK, JSON.stringify({roms:st.roms, drvRom:st.drvRom||'1541-II', sel:st.sel||{}, port:st.port, auto:$('autoStart').checked, kbJoy:$('kbJoy').checked, prg:$('prgName').value, kbd:$('app').dataset.kbd==='1'}));
+  if(!ok) msg('Cannot save in the browser (ROMs included)');
+}
+function romInfo(){
+  const n=Object.keys(st.roms).filter(k=>st.roms[k]&&st.roms[k].b64).map(k=>k+' ('+st.roms[k].name+')');
+  $('romInfo').textContent = 'Attive (incorporate, VICE): Kernal '+((st.sel&&st.sel.kernal)||DEFSEL.kernal)+', Basic 901226-01, Chargen '+((st.sel&&st.sel.chargen)||DEFSEL.chargen)+', drive '+(st.drvRom||'1541-II')+'. '+(n.length?'Replaced by: '+n.join(', '):'No user ROM loaded.');
+}
+document.querySelectorAll('input[data-rom]').forEach(inp=>{
+  inp.addEventListener('change', async ()=>{
+    const f=inp.files[0]; if(!f) return;
+    st.roms[inp.dataset.rom]={name:f.name,b64:await fileToB64(f)};
+    savePrefs(); romInfo();
+    if(st.running){ msg('ROM saved — restarting'); launch(); } else msg('ROM saved');
+    inp.value='';
+  });
+});
+$('romClear').onclick=()=>{ st.roms={}; savePrefs(); romInfo(); msg('User ROMs removed (the VICE ones come back at the next start)'); };
+for(const [id,key,tab] of [['selKernal','kernal',KERNALS],['selChargen','chargen',CHARGENS]]){ const el=$(id); el.innerHTML=Object.keys(tab).map(k=>'<option value="'+k+'">'+(key==='kernal'?'Kernal ':'Chargen ')+tab[k]+'</option>').join('');
+  el.addEventListener('change',()=>{ st.sel=st.sel||{}; st.sel[key]=el.value; savePrefs(); romInfo(); msg(key+' '+el.value+': active from the next start'); }); }
+$('drvRom').addEventListener('change',()=>{ st.drvRom=$('drvRom').value; savePrefs(); romInfo(); msg('ROM drive '+st.drvRom+': active from the next start'); });
+$('autoStart').addEventListener('change',savePrefs); $('kbJoy').addEventListener('change',savePrefs); $('prgName').addEventListener('change',savePrefs);
+
+function mountDisk(name,bin){
+  st.disk={ name, bin }; drvDraw();
+  $('diskName').textContent='📀 '+name+' ('+Math.round(bin.length/1024)+' KB)';
+  if(st.running && st.injected){ send({cmd:'load', file_name:name, file:bin}); afterInsert(); }
+  else if(!st.running){ launch(); }
+}
+$('diskFile').addEventListener('change', async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  mountDisk(f.name, new Uint8Array(await f.arrayBuffer())); closeMenu();
+  e.target.value='';
+});
+$('ejectBtn').onclick=()=>{ emu("try{wasm_eject_disk('drive8')}catch(e){}"); st.disk=null; drvDraw(); $('diskName').textContent='No file selected'; msg('Disk ejected'); };
+
+/* ===================================================================
+   Emulator buttons
+   =================================================================== */
+$('bPause').onclick=()=>{ act('toggle_run'); };
+$('bReset').onclick=()=>{ emu("wasm_reset();reset_keyboard();"); msg('Reset'); };
+$('bWarp').onclick=()=>{ act('toggle_warp'); };
+$('bAudio').onclick=()=>{ if(!st.running) return msg("Start the emulator first"); send('toggle_audio()'); };
+$('advBtn').onclick=()=>{ act('menubar'); closeMenu(); };
+$('snapBtn').onclick=()=>{ act('take_snapshot'); msg('Snapshot requested'); closeMenu(); };
+$('rsrBtn').onclick=()=>{ emu("wasm_runstop_restore();"); closeMenu(); };
+$('bFs').onclick=()=>{
+  const el=$('app');
+  if(document.fullscreenElement||document.webkitFullscreenElement){ (document.exitFullscreen||document.webkitExitFullscreen).call(document); return; }
+  const f=el.requestFullscreen||el.webkitRequestFullscreen;
+  if(f){ try{ const r=f.call(el); if(r&&r.catch) r.catch(()=>msg('Full screen not available')); }catch(e){ msg('Full screen not available'); } }
+  else msg('Full screen not supported by this browser (iPhone: use "Add to Home Screen")');
+};
+function openMenu(){ $('app').dataset.menu='1'; }
+function closeMenu(){ $('app').dataset.menu='0'; }
+$('bMenu').onclick=openMenu; $('sClose').onclick=closeMenu;
+
+document.querySelectorAll('[data-cmd]').forEach(b=>b.addEventListener('click',()=>{
+  const c=b.getAttribute('data-cmd');
+  if(c==='load"*",8,1'){
+    emu("await action("+JSON.stringify("'"+c+"'=>Enter")+");await disk_loading_finished();");
+  }else act("'"+c+"'=>Enter");
+  closeMenu();
+}));
+$('typeBtn').onclick=()=>{
+  const t=$('typeTxt').value; if(!t) return;
+  act("'"+t.replace(/'/g,"\\'")+"'"+($('typeEnter').checked?'=>Enter':'')); closeMenu();
+};
+$('scriptBtn').onclick=()=>{ const s=$('scriptTxt').value.trim(); if(s){ act(s); closeMenu(); } };
+
+/* ===================================================================
+   Joystick e Fire (pointer events, multitouch)
+   =================================================================== */
+const joyOn={up:0,down:0,left:0,right:0,fire:0};
+function joy(dir,on){
+  if(!!joyOn[dir]===on) return; joyOn[dir]=on?1:0;
+  if(st.running&&frame) send({cmd:'script', script:"action('j"+st.port+dir+(on?1:0)+"');"});
+}
+const pad=$('dpad'), fire=$('fireBtn');
+const knob=pad.querySelector('.knob');
+const none={up:0,down:0,left:0,right:0};
+let curDir=none;
+function applyDir(s){ curDir=s; for(const d in none) joy(d,!!s[d]); }
+function stickMove(e){
+  const r=pad.getBoundingClientRect(), R=r.width/2, kr=R*0.42;       // raggio stick, raggio pomello
+  let dx=e.clientX-(r.left+R), dy=e.clientY-(r.top+R);
+  const len=Math.hypot(dx,dy), maxT=R-kr-2;
+  const k=len>maxT?maxT/len:1;
+  knob.style.transform='translate('+(dx*k)+'px,'+(dy*k)+'px)';
+  if(len<R*0.28) return none;                                          // zona morta
+  const a=Math.atan2(dy,dx)*180/Math.PI;                               // 8 direzioni
+  return {right:Math.abs(a)<=67.5,left:Math.abs(a)>=112.5,down:a>=22.5&&a<=157.5,up:a<=-22.5&&a>=-157.5};
+}
+function stickReset(){ knob.style.transform='translate(0,0)'; pad.classList.remove('on'); applyDir(none); }
+let pid=null;
+pad.addEventListener('pointerdown',e=>{pid=e.pointerId;try{pad.setPointerCapture(pid)}catch(_){}pad.classList.add('on');applyDir(stickMove(e));e.preventDefault()});
+pad.addEventListener('pointermove',e=>{if(e.pointerId===pid)applyDir(stickMove(e))});
+const padUp=e=>{if(e.pointerId===pid){pid=null;stickReset()}};
+['pointerup','pointercancel','lostpointercapture'].forEach(t=>pad.addEventListener(t,padUp));
+let fid=null;
+fire.addEventListener('pointerdown',e=>{fid=e.pointerId;try{fire.setPointerCapture(fid)}catch(_){}fire.classList.add('on');joy('fire',true);e.preventDefault()});
+const fireUp=e=>{if(e.pointerId===fid){fid=null;fire.classList.remove('on');joy('fire',false)}};
+['pointerup','pointercancel','lostpointercapture'].forEach(t=>fire.addEventListener(t,fireUp));
+[pad,fire].forEach(el=>el.addEventListener('contextmenu',e=>e.preventDefault()));
+function releaseAllInput(){ stickReset(); fire.classList.remove('on'); joy('fire',false); pid=fid=null; }
+window.addEventListener('blur',releaseAllInput);
+document.addEventListener('visibilitychange',()=>{ if(document.hidden) releaseAllInput(); });
+
+function setPort(p){
+  releaseAllInput(); st.port=p;
+  $('port1Btn').classList.toggle('on',p===1); $('port2Btn').classList.toggle('on',p===2);
+  $('bPort').textContent='J'+p; savePrefs();
+  if(st.running) msg('Joystick on port '+p);
+}
+$('port1Btn').onclick=()=>setPort(1); $('port2Btn').onclick=()=>setPort(2);
+$('bPort').onclick=()=>setPort(st.port===2?1:2);
+
+/* ===================================================================
+   C64 keyboard (matrix via vc64web press_key / release_key: holding supported)
+   =================================================================== */
+// [label, vc64web physical code, shift label, classes, kind]  kind: k=key, m=latching modifier
+const K=(l,c,s,cl)=>[l,c,s||'',cl||'','k'];
+const M=(l,c,cl,id)=>[l,c,'','mod '+(cl||''),'m',id];
+const L=ch=>K(ch,'Key'+ch);
+const ROWS=[
+  [K('←','Delete','','dark'),K('1','Digit1','!'),K('2','Digit2','"'),K('3','Digit3','#'),K('4','Digit4','$'),K('5','Digit5','%'),K('6','Digit6','&'),K('7','Digit7',"'"),K('8','Digit8','('),K('9','Digit9',')'),K('0','Digit0'),K('+','Minus'),K('-','Equal'),K('£','pound'),K('HOME','home','CLR','dark s2'),K('DEL','Backspace','INS','dark s2')],
+  [M('CTRL','ControlLeft','w15','ctrl'),...'QWERTYUIOP'.split('').map(L),K('@','BracketLeft'),K('*','BracketRight'),K('↑','upArrow','π','dark'),K('RESTORE','restore','','dark w15')],
+  [K('RUN\nSTOP','runStop','','dark w15'),...'ASDFGHJKL'.split('').map(L),K(':','Semicolon','['),K(';','Quote',']'),K('=','Backslash'),K('RETURN','Enter','','dark w2')],
+  [M('C=','commodore','','cbm'),M('SHIFT','ShiftLeft','w15','shift'),...'ZXCVBNM'.split('').map(L),K(',','Comma','<'),K('.','Period','>'),K('/','Slash','?'),M('SHIFT','rightShift','w15','shift'),K('↓','ArrowDown','↑','dark'),K('→','ArrowRight','←','dark')],
+  [K('F1','F1','F2','dark w2'),K('F3','F3','F4','dark w2'),K('SPACE','Space','','w6'),K('F5','F5','F6','dark w2'),K('F7','F7','F8','dark w2')]
+];
+const kbd=$('kbd');
+ROWS.forEach(row=>{
+  const rd=document.createElement('div'); rd.className='krow';
+  row.forEach(([label,code,sh,cls,type,id])=>{
+    const b=document.createElement('button'); b.type='button'; const ln=Math.max(...label.split('\n').map(x=>x.length));
+    b.className='key '+cls+(ln>=7?' s3':ln>=6?' s2':ln>=4?' s1':'');
+    b.innerHTML=label.replace('\n','<br>')+(sh?'<small>'+sh+'</small>':'');
+    b.dataset.code=code; b.dataset.type=type; if(id) b.dataset.mod=id;
+    rd.appendChild(b);
+  });
+  kbd.appendChild(rd);
+});
+const MODCODE={ctrl:'ControlLeft',cbm:'commodore',shift:'ShiftLeft'};
+function clearMods(){ st.mods.shift=st.mods.ctrl=st.mods.cbm=false; kbd.querySelectorAll('.key.mod').forEach(k=>k.classList.remove('on')); }
+function activeModCodes(){
+  const a=[]; for(const m of ['ctrl','cbm','shift']) if(st.mods[m]) a.push(MODCODE[m]); return a;
+}
+// press/release with a minimum hold (≥70 ms) to be sure the C64 sees it
+const held=new Map();   // pointerId -> {code,mods,t}
+function keyDown(code,mods){
+  emu(mods.map(m=>'press_key("'+m+'");').join('')+'press_key("'+code+'");');
+}
+function keyUp(code,mods,t){
+  const wait=Math.max(0,70-(performance.now()-t));
+  setTimeout(()=>emu('release_key("'+code+'");'+mods.slice().reverse().map(m=>'release_key("'+m+'");').join('')),wait);
+}
+function bindKeyEl(el,getCode,opts){
+  el.addEventListener('pointerdown',e=>{
+    e.preventDefault();
+    if(!st.running){ msg("Start the emulator first"); return; }
+    try{ el.setPointerCapture(e.pointerId); }catch(_){}
+    el.classList.add('hit');
+    const code=getCode(), mods=opts&&opts.sticky?activeModCodes():[];
+    if(opts&&opts.sticky) clearMods();
+    held.set(e.pointerId,{code,mods,t:performance.now(),el});
+    keyDown(code,mods);
+  });
+  const up=e=>{
+    const h=held.get(e.pointerId); if(!h||h.el!==el) return;
+    held.delete(e.pointerId); el.classList.remove('hit'); keyUp(h.code,h.mods,h.t);
+  };
+  ['pointerup','pointercancel','lostpointercapture'].forEach(t=>el.addEventListener(t,up));
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+}
+kbd.querySelectorAll('.key').forEach(el=>{
+  if(el.dataset.type==='m'){
+    el.addEventListener('pointerdown',e=>{
+      e.preventDefault(); const m=el.dataset.mod; st.mods[m]=!st.mods[m];
+      kbd.querySelectorAll('.key.mod[data-mod="'+m+'"]').forEach(k=>k.classList.toggle('on',st.mods[m]));
+    });
+  }else bindKeyEl(el,()=>el.dataset.code,{sticky:true});
+});
+document.querySelectorAll('.qk').forEach(el=>bindKeyEl(el,()=>el.dataset.code,{sticky:false}));
+function releaseAllKeys(){ for(const [id,h] of held){ keyUp(h.code,h.mods,0); h.el.classList.remove('hit'); } held.clear(); }
+window.addEventListener('blur',releaseAllKeys);
+
+function setKbd(on){ $('app').dataset.kbd=on?'1':'0'; $('bKbd').classList.toggle('on',on); }
+$('bKbd').onclick=()=>{ setKbd($('app').dataset.kbd!=='1'); savePrefs(); };
+
+/* the focus goes back to the emulator after a touch on the controls (physical keyboard on desktop) */
+document.addEventListener('pointerup',e=>{
+  if(frame && !e.target.closest('input,textarea,#sheet')){ try{ frame.focus(); }catch(_){} }
+});
+window.addEventListener('beforeunload',()=>{ savePrefs(); });
+
+
+/* POKE / PEEK manuale dal menu */
+(function(){
+  const core=()=>{ const w=frame&&st.running?frame.contentWindow:null; if(!w||typeof w.wasm_peek!=='function') throw new Error("Start the emulator first"); return w; };
+  const ramView=f=>{ const w=core(); if(!$('pkRam').checked) return f(w); const old=w.wasm_peek(1); w.wasm_poke(1,old&0xF8); try{ return f(w); } finally{ w.wasm_poke(1,old); } };   // plain RAM: $01 = RAM everywhere, then restore
+  const memPeek=a=>ramView(w=>w.wasm_peek(a)), memPoke=(a,v)=>ramView(w=>w.wasm_poke(a,v));
+  const num=t=>{ t=String(t).trim(); if(/^\$[0-9a-f]+$/i.test(t)) return parseInt(t.slice(1),16); if(/^0x[0-9a-f]+$/i.test(t)) return parseInt(t,16); if(/^%[01]+$/.test(t)) return parseInt(t.slice(1),2); if(/^\d+$/.test(t)) return +t; return NaN; };
+  const out=(m,ok)=>{ const o=$('pkOut'); o.textContent=m; o.style.color=ok===false?'#c2231d':'inherit'; };
+  const hx=(v,n)=>v.toString(16).toUpperCase().padStart(n,'0');
+  function addrVal(){ let a=num($('pkAddr').value); if(isNaN(a)&&$('pkAddr').value.trim()) {  } return a; }
+  $('pkPoke').onclick=()=>{
+    const a=addrVal(), v=num($('pkVal').value);
+    if(isNaN(a)||a<0||a>65535) return out('Invalid address (0–65535, $0000–$FFFF)',false);
+    if(isNaN(v)||v<0||v>255) return out('Invalid value (0–255, $00–$FF)',false);
+    try{ memPoke(a,v); const r=memPeek(a); out('POKE '+a+','+v+'  →  $'+hx(a,4)+' = $'+hx(r,2)+' ('+r+')'+(r!==v?'  (a different value was read: unused bits, I/O register or ROM)':''));
+    }catch(e){ out(e.message,false); }
+  };
+  $('pkPeek').onclick=()=>{
+    const a=addrVal(); if(isNaN(a)||a<0||a>65535) return out('Invalid address (0–65535, $0000–$FFFF)',false);
+    try{ const r=memPeek(a); out('PEEK('+a+')  →  $'+hx(r,2)+' = '+r+' = %'+r.toString(2).padStart(8,'0')); }catch(e){ out(e.message,false); }
+  };
+  [$('pkAddr'),$('pkVal')].forEach(el=>el.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('pkPoke').click(); } e.stopPropagation(); }));
+})();
+
+/* ---- Drive indicator (LED + head position), from the core events MSG_DRIVE_LED / _MOTOR / _STEP ----
+   MSG_DRIVE_STEP data2 = half-track (1-based): track = (n+1)/2 (verified: directory = 35 -> track 18).
+   No sector and no read/write information is available from the events: the LED is green when on. */
+const DRV_NT=35, DRV_SPT=t=>t<=17?21:t<=24?19:t<=30?18:17;
+const drv={ led:0, motor:0, ht:null, tmo:null };
+function drvAttach(){
+  emu("if(!window.__drvHook){window.__drvHook=1;const o=window.message_handler;window.message_handler=function(m,a,b){try{if(m==='MSG_DRIVE_LED'||m==='MSG_DRIVE_STEP'||m==='MSG_DRIVE_MOTOR')window.parent.postMessage({msg:'drive',m:m,a:Number(a),b:Number(b)},'*')}catch(e){}return o.apply(this,arguments)}}");
+  $('drv').hidden=false; drvDraw();
+}
+function drvReset(){ drv.led=0; drv.motor=0; drv.ht=null; $('drv').hidden=true; drvShow(); }
+function drvBam(){      // free blocks per track from the BAM of the d64 (T18/S0); null if not a standard d64
+  const b=st.disk&&st.disk.bin; if(!b||!/\.d64$/i.test(st.disk.name)||(b.length!==174848&&b.length!==175531)) return null;
+  const o=357*256, r=[]; for(let t=1;t<=DRV_NT;t++) r.push(b[o+4*t]); return r;
+}
+const DRV_ZC=['56,197,216','240,160,48','176,120,255','77,141,255'];     // hardware speed zone 0..3 (colours)
+const drvZone=t=>t<=17?3:t<=24?2:t<=30?1:0;                              // 1541 speed zones: T1-17 = 3, T18-24 = 2, T25-30 = 1, T31-35 = 0
+function drvDraw(){
+  const cv=$('drvCv'); if(!cv||$('drv').hidden) return;
+  const r=devicePixelRatio||1, w=cv.clientWidth, h=cv.clientHeight; if(!w||!h) return;
+  cv.width=w*r; cv.height=h*r; const c=cv.getContext('2d'); c.scale(r,r);
+  const bam=drvBam(), tw=w/DRV_NT;
+  for(let t=1;t<=DRV_NT;t++){
+    let u=0.5; if(bam){ const n=DRV_SPT(t); u=0.2+0.7*Math.max(0,Math.min(1,(n-bam[t-1])/n)); }
+    c.fillStyle='rgba('+DRV_ZC[drvZone(t)]+','+u.toFixed(2)+')'; c.fillRect((t-1)*tw+.5,2,tw-1,h-4);
+  }
+  c.fillStyle='rgba(224,184,74,.45)'; c.fillRect(17*tw,0,tw,h);     // track 18 (directory)
+}
+function drvShow(){
+  $('drvLed').className=drv.led?'on':'';
+  $('drv').classList.toggle('act',!!(drv.led||drv.motor));
+  const tr=$('drvTr');
+  if(drv.ht!==null){
+    const t=(drv.ht+1)/2, tt=Math.round(t), p=(t-.5)/DRV_NT, lw=$('drvLblRow').clientWidth;
+    $('drvHead').style.left=(p*100)+'%';
+    tr.textContent='T'+tt+' · Zone '+drvZone(tt);
+    tr.style.left=Math.max(55,Math.min(lw-55,p*lw))+'px';
+  } else { $('drvHead').style.left='-10px'; tr.textContent=''; }
+}
+function drvEvent(d){
+  if(d.a!==0) return;                     // drive 8 only
+  if(d.m==='MSG_DRIVE_LED') drv.led=d.b?1:0;
+  else if(d.m==='MSG_DRIVE_MOTOR') drv.motor=d.b?1:0;
+  else if(d.m==='MSG_DRIVE_STEP'&&d.b>=1&&d.b<=84) drv.ht=d.b;
+  drvShow();
+}
+addEventListener('resize',drvDraw);
+
+/* init */
+const firstRun = lsGet(LSK)===null;
+loadPrefs(); $('drvRom').value=st.drvRom||'1541-II'; $('selKernal').value=(st.sel&&st.sel.kernal)||DEFSEL.kernal; $('selChargen').value=(st.sel&&st.sel.chargen)||DEFSEL.chargen; setPort(st.port); romInfo();
+document.querySelectorAll('.verTag').forEach(e=>e.textContent=APP_BUILD);
+if(firstRun && matchMedia('(orientation:portrait)').matches) setKbd(true);   // first start in portrait: keyboard visible
+
+/* ?disk=URL[&program=NAME] (13/11): downloads the disk and starts it (with "Autoload + RUN" if on). fetch with cache 'no-cache':
+   the browser asks the server whether the file changed and downloads it again only then. No parameter: no network request.
+   It works only from a web server (from file:// the browser blocks fetch). */
+(async function(){
+  const q=new URLSearchParams(location.search), u=q.get('disk'); if(!u) return;
+  if(q.has('program')) $('prgName').value=q.get('program').replace(/["\\]/g,'');
+  try{
+    const r=await fetch(u,{cache:'no-cache'}); if(!r.ok) throw new Error('HTTP '+r.status);
+    const name=decodeURIComponent(new URL(u,location.href).pathname.split('/').pop())||'disk.d64';
+    mountDisk(name,new Uint8Array(await r.arrayBuffer()));
+  }catch(e){ msg('Disk not loaded ('+u+'): '+e.message); }
+})();
+</script>
+</body>
+</html>

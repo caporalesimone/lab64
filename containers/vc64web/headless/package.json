@@ -1,0 +1,8 @@
+{
+  "name": "c64-headless",
+  "version": "1.0.0",
+  "private": true,
+  "description": "c64d daemon (VirtualC64 controllable from the command line)",
+  "bin": { "c64": "c64", "c64d": "c64d.js" },
+  "dependencies": { "playwright": "1.63.0" }
+}

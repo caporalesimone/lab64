@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C64 control center</title>
+<!-- lab64-viewer index page: control center of a C64 project (13/11; 14/11 control center). Copyright (c) 2026 - Simone Caporale
+     Generic: it knows nothing about the project. It reads only files served by the viewer server (server.js), read-only:
+       /out/releases/v<V>/manifest.json   one card per version (format: docs/manifest.md)
+       /out/tmp/build.json, tests.json    live build and test status (format: same place)
+       /out/cache/vc64web/                vc64web page (in-browser emulator)
+       /config.js                         VIEW_TITLE = project name (C64_VIEW_TITLE in lab64.env)
+     and drives VICE on the live screen with POST /control (player containers/tools/py/viewer_player.py, when C64_VIEW_PLAYER is defined).
+     Without manifest.json it lists only the .d64 disks found in out/releases/v*/ and in out/.
+     Theme (14/11, owner's request): modern but reminiscent of the C64 and its manuals: beige paper, brown ink, dark red, rainbow
+     stripes, key-shaped labels. -->
+<script src="config.js"></script>
+<style>
+  :root {
+    --paper:#f3ead3; --card:#fbf6e9; --ink:#2a2118; --ink2:#6a5a40; --rule:#d6c8a2; --rule2:#c9b98f;
+    --red:#8a1c14; --key:#fffaf0; --keyink:#2a2118; --night:#14121c; --nightfg:#f0e6c8; --phos:#7ee0a2;
+    --ok:#3d7a26; --okbg:#e3ecd0; --bad:#a3261b; --badbg:#f6dcd3; --warn:#9a6a00; --warnbg:#f6e7bf;
+    --r1:#c8301e; --r2:#e8762b; --r3:#f2c230; --r4:#4f9d45; --r5:#2f6db5;
+    --mono:"DejaVu Sans Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans:system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --paper:#18140f; --card:#221c15; --ink:#efe4c8; --ink2:#b3a37f; --rule:#3b3125; --rule2:#4d4030;
+    --red:#e2735c; --key:#2e261d; --keyink:#efe4c8; --night:#0d0c12; --nightfg:#f0e6c8;
+    --ok:#9ccc78; --okbg:#243320; --bad:#f08a76; --badbg:#3c1e18; --warn:#e6bb55; --warnbg:#3a2f12;
+  } }
+  :root[data-theme="dark"] {
+    --paper:#18140f; --card:#221c15; --ink:#efe4c8; --ink2:#b3a37f; --rule:#3b3125; --rule2:#4d4030;
+    --red:#e2735c; --key:#2e261d; --keyink:#efe4c8; --night:#0d0c12; --nightfg:#f0e6c8;
+    --ok:#9ccc78; --okbg:#243320; --bad:#f08a76; --badbg:#3c1e18; --warn:#e6bb55; --warnbg:#3a2f12;
+  }
+  * { box-sizing:border-box; }
+  html { background:var(--paper); }
+  body { margin:0; color:var(--ink); background:var(--paper); font:15px/1.5 var(--sans); }
+  a { color:var(--red); }
+  code, .mono { font-family:var(--mono); font-size:.88em; }
+  .dim { color:var(--ink2); }
+  .small { font-size:13px; }
+
+  /* header: the dark "box" with the rainbow stripes, like the Commodore boxes and manuals */
+  .top { background:var(--night); color:var(--nightfg); position:relative; overflow:hidden; }
+  .top .in { max-width:1180px; margin:0 auto; padding:22px 330px 20px 16px; position:relative; z-index:1; display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; align-items:flex-end; }
+  .top h1 { margin:0; font:700 24px/1.15 var(--mono); letter-spacing:.04em; }
+  .top .proj { font:600 13px var(--mono); letter-spacing:.18em; text-transform:uppercase; color:#d9c99e; margin-bottom:6px; }
+  .top .sub { font:13px var(--mono); color:#c9bd9c; }
+  .top .rainbow { position:absolute; right:-40px; top:0; bottom:0; width:340px; display:flex; transform:skewX(-28deg); opacity:.95; }
+  .top .rainbow i { flex:1; }
+  @media (max-width:1500px) { .top .in { padding-right:max(16px, calc(330px - (100vw - 1180px) / 2)); } }
+  @media (max-width:700px) { .top .rainbow { width:180px; opacity:.55; } .top .in { padding-right:16px; } .top .sub { position:relative; z-index:1; text-shadow:0 0 6px var(--night), 0 0 2px var(--night); } }
+  .stripes { height:15px; display:grid; grid-template-rows:repeat(5, 1fr); }
+  .r1 { background:var(--r1); } .r2 { background:var(--r2); } .r3 { background:var(--r3); } .r4 { background:var(--r4); } .r5 { background:var(--r5); }
+
+  main { max-width:1180px; margin:0 auto; padding:22px 16px 64px; }
+  main > *, .card, section { min-width:0; }
+  section, .card { background:var(--card); border:1px solid var(--rule); border-top:3px solid var(--red); padding:14px 16px 16px; margin:0 0 16px; }
+  .card.latest { border-color:var(--rule2); border-top-color:var(--r5); box-shadow:inset 0 3px 0 -1px var(--r5); }
+  h2 { display:inline-block; font:600 12.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; background:var(--ink); color:var(--paper);
+       padding:2px 8px; margin:0 0 12px; }
+  h3 { font:700 21px var(--mono); margin:0; color:var(--red); }
+  .head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
+  .grid3 { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:16px; margin-bottom:16px; }
+  .grid3 > section { margin:0; }
+  @media (max-width:900px) { .grid3 { grid-template-columns:minmax(0,1fr); } }
+
+  /* keys: buttons, action links and labels drawn like the C64 keys in the manual */
+  .key, button { font:600 13px var(--mono); color:var(--keyink); background:var(--key); border:1.5px solid var(--keyink); border-radius:6px;
+       padding:4px 11px 3px; box-shadow:0 3px 0 var(--keyink); cursor:pointer; text-decoration:none; display:inline-flex; gap:6px; align-items:center;
+       margin-bottom:3px; transition:transform .05s, box-shadow .05s; white-space:nowrap; }
+  .key:hover, button:hover { background:var(--paper); }
+  .key:active, button:active { transform:translateY(3px); box-shadow:0 0 0 var(--keyink); }
+  .key:focus-visible, button:focus-visible { outline:2px solid var(--r5); outline-offset:3px; }
+  .key.dark, button.dark { background:var(--keyink); color:var(--key); }                  /* like RUN/STOP and the function keys */
+  .key.dark:hover, button.dark:hover { background:var(--red); border-color:var(--red); box-shadow:0 3px 0 var(--ink); }
+  button.warnk { background:var(--badbg); }
+  button:disabled { opacity:.45; cursor:default; transform:none; box-shadow:0 3px 0 var(--keyink); }
+  .tag { font:600 11.5px var(--mono); padding:1px 7px; border:1.5px solid currentColor; border-radius:5px; box-shadow:0 2px 0 currentColor;
+         color:var(--ink2); background:var(--key); white-space:nowrap; display:inline-block; margin-bottom:2px; }
+  .tag.ok { color:var(--ok); background:var(--okbg); } .tag.bad { color:var(--bad); background:var(--badbg); }
+  .tag.warn { color:var(--warn); background:var(--warnbg); } .tag.blue { color:var(--r5); }
+  .actions { display:flex; gap:10px; flex-wrap:wrap; margin:12px 0 6px; align-items:center; }
+  .chips { display:flex; gap:7px; flex-wrap:wrap; align-items:center; }
+
+  .state { font:700 16px var(--mono); display:flex; align-items:center; gap:9px; }
+  .led { width:12px; height:8px; border-radius:2px; background:var(--rule2); flex:none; box-shadow:inset 0 0 0 1px rgba(0,0,0,.25); }
+  .led.ok { background:#5fbf3f; } .led.fail { background:#e0301e; } .led.running { background:#f2a03a; animation:pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity:.35; } }
+  @media (prefers-reduced-motion: reduce) { .led.running { animation:none; } }
+  .bar { height:8px; background:var(--rule); margin:10px 0 6px; display:flex; }
+  .bar i { display:block; height:100%; }
+  .meta { font:13px var(--mono); color:var(--ink2); }
+  .results { max-height:210px; overflow:auto; margin-top:8px; border-top:1px dashed var(--rule2); padding-top:6px; }
+  .results div { font:12.5px var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .up { color:var(--ok); } .down { color:var(--bad); }
+  .msg { margin-top:8px; color:var(--bad); font-size:13px; }
+
+  .kv { display:grid; grid-template-columns:repeat(auto-fill, minmax(175px, 1fr)); gap:10px 18px; margin:14px 0 10px; }
+  .kv div { border-left:3px solid var(--rule2); padding-left:9px; }
+  .kv b { display:block; font:700 17px var(--mono); }
+  .kv span { font-size:12.5px; color:var(--ink2); }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th { background:var(--ink); color:var(--paper); text-align:left; padding:4px 8px; font:600 12px var(--mono); letter-spacing:.04em; }
+  td { border-bottom:1px solid var(--rule); padding:5px 8px; vertical-align:top; }
+  td.num, th.num { text-align:right; white-space:nowrap; font-family:var(--mono); }
+  tr.missing td { color:var(--ink2); font-style:italic; }
+  .tablewrap { overflow-x:auto; }
+  details { margin-top:10px; } summary { cursor:pointer; color:var(--red); font:600 13px var(--mono); }
+  .spark { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:16px; }
+  .spark > div { font-size:13px; color:var(--ink2); border-left:3px solid var(--rule2); padding-left:9px; }
+  .spark b { color:var(--ink); font:700 16px var(--mono); }
+  .spark svg { display:block; width:100%; height:38px; margin-top:6px; overflow:visible; }
+  select { font:600 13px var(--mono); padding:3px 6px; border:1.5px solid var(--ink); border-radius:5px; background:var(--key); color:var(--ink); }
+  .cmd { display:block; background:var(--night); color:var(--phos); font:13px/1.5 var(--mono); padding:8px 12px; margin:8px 0; overflow-x:auto; white-space:pre; }
+  .note { font-size:13.5px; color:var(--ink2); margin:10px 0 0; }
+  .themeb { position:absolute; right:16px; top:12px; z-index:2; }
+  .themeb button { font-size:11px; padding:2px 7px 1px; box-shadow:0 2px 0 var(--keyink); }
+
+  /* live screen: thumbnail (view only) framed like the manual cover; click = big interactive window */
+  #mini { position:fixed; right:18px; bottom:18px; width:min(360px, calc(100vw - 36px)); z-index:20; background:var(--night);
+          border:5px solid var(--nightfg); box-shadow:0 0 0 1.5px var(--ink), 0 10px 30px rgba(0,0,0,.35); }
+  #mini header, #big header { display:flex; justify-content:space-between; align-items:center; gap:8px; background:var(--night); color:var(--nightfg);
+          font:600 12px var(--mono); letter-spacing:.1em; padding:4px 6px 5px 8px; }
+  #mini header .stripes, #big header .stripes { width:44px; height:12px; }
+  #mini header button, #big header button { font-size:11px; padding:1px 7px 0; box-shadow:0 2px 0 var(--keyink); margin:0; }
+  #mini .frame { position:relative; aspect-ratio:1280/1000; background:#000; }
+  #mini iframe { position:absolute; inset:0; width:100%; height:100%; border:0; pointer-events:none; }
+  #mini .hit { position:absolute; inset:0; cursor:zoom-in; }
+  #mini .hit:hover { outline:3px solid var(--r3); outline-offset:-3px; }
+  #mini.closed .frame { display:none; }
+  @media (max-width:700px) { #mini { width:200px; right:10px; bottom:10px; } body.pad { padding-bottom:200px; } }
+  #big { position:fixed; inset:0; background:rgba(20,18,28,.82); z-index:30; display:none; padding:16px; }
+  #big.open { display:flex; flex-direction:column; }
+  #big .win { flex:1; display:flex; flex-direction:column; border:5px solid var(--nightfg); background:#000; }
+  #big iframe { flex:1; width:100%; border:0; background:#000; }
+  body.pad { padding-bottom:300px; }
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="rainbow" aria-hidden="true"><i class="r1"></i><i class="r2"></i><i class="r3"></i><i class="r4"></i><i class="r5"></i></div>
+  <div class="themeb"><button id="themebtn" title="light / dark theme">THEME</button></div>
+  <div class="in">
+    <div>
+      <div class="proj" id="proj">C64 project</div>
+      <h1>C64 CONTROL CENTER</h1>
+    </div>
+    <div class="sub" id="sub">...</div>
+  </div>
+</div>
+<div class="stripes" aria-hidden="true"><i class="r1"></i><i class="r2"></i><i class="r3"></i><i class="r4"></i><i class="r5"></i></div>
+
+<main>
+  <div class="grid3">
+    <section><h2>Build</h2><div id="build">...</div></section>
+    <section><h2>Test</h2><div id="tests">...</div></section>
+    <section><h2>VICE live</h2><div id="player">...</div></section>
+  </div>
+
+  <section>
+    <h2>Try it yourself</h2>
+    <div class="actions" style="margin-top:0">
+      <button data-basic="1" class="dark">Empty VICE · READY.</button>
+      <a class="key" id="vcbare" target="_blank">Empty vc64web</a>
+      <a class="key" id="vcdl" title="the vc64web page as one HTML file (e.g. for the phone)">↓ HTML</a>
+      <button id="openbig">Big screen</button>
+      <a class="key" href="live.html" target="_blank">Screen in a tab</a>
+      <a class="key" id="sidstudio" href="sid.html" target="_blank" title="SID Studio: player and analysis of .sid files (the music of the latest version, or your own files)">♪ SID Studio</a>
+    </div>
+    <div id="mine"></div>
+    <p class="note">VICE starts on the live screen, at real speed and with audio. In the <b>big screen</b> the PC keyboard reaches the C64;
+      the buttons at the top turn on <b>Keyboard</b> (on-screen C64 keyboard), <b>Joy 1</b>, <b>Joy 2</b> and <b>Audio</b>. From the VICE menu
+      (File → Smart attach) any file of the project can be attached, in <code>/work</code>. Your own files (<code>.d64 .g64 .prg .t64 .crt</code>)
+      copied into <code>out/tmp/</code> show up above. From the shell:</p>
+    <code class="cmd" id="cmdline">lab64 play x64sc &lt;options&gt;</code>
+  </section>
+
+  <section id="trendbox" hidden>
+    <h2>Trends</h2>
+    <div class="spark" id="trends"></div>
+    <p class="note">From the oldest to the newest of the versions kept in <code>out/releases/</code>. Hover a chart for the values.</p>
+  </section>
+
+  <section id="cmpbox" hidden>
+    <div class="head">
+      <h2 style="margin:0">Compare</h2>
+      <div class="actions" style="margin:0"><select id="cmpA"></select> <span class="dim">→</span> <select id="cmpB"></select></div>
+    </div>
+    <div id="cmp" style="margin-top:12px"></div>
+  </section>
+
+  <h2 style="margin:10px 0 14px">Versions</h2>
+  <div id="cards" class="meta">looking in out/releases/ ...</div>
+  <p class="note">Viewer on localhost · refresh every 2 s · <a href="out/" target="_blank">out/ folder</a> (read-only)</p>
+</main>
+
+<div id="mini">
+  <header><span style="display:flex;gap:8px;align-items:center"><span class="stripes" aria-hidden="true"><i class="r1"></i><i class="r2"></i><i class="r3"></i><i class="r4"></i><i class="r5"></i></span>LIVE</span>
+    <span><button id="minibig" title="big screen, interactive">⤢</button> <button id="minitog" title="minimize">–</button></span></header>
+  <div class="frame"><div class="hit" id="minihit" title="click: big screen, interactive"></div></div>
+</div>
+<div id="big">
+  <div class="win">
+    <header><span style="display:flex;gap:8px;align-items:center"><span class="stripes" aria-hidden="true"><i class="r1"></i><i class="r2"></i><i class="r3"></i><i class="r4"></i><i class="r5"></i></span>LIVE SCREEN · keyboard, joysticks and audio from the buttons at the top</span>
+      <button id="bigclose">ESC · close</button></header>
+  </div>
+</div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const natural = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+const encPath = p => p.split('/').map(encodeURIComponent).join('/');
+const fmtB = n => n == null ? '–' : n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
+const fmtT = s => s == null ? '–' : s < 60 ? Math.round(s) + ' s' : Math.floor(s / 60) + ' min ' + String(Math.round(s % 60)).padStart(2, '0') + ' s';
+const fmtD = iso => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '';
+const ago = t => { const s = Math.max(0, Date.now() / 1000 - t); return s < 90 ? Math.round(s) + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago'; };
+const store = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* niente */ } } };
+const fmtUnit = (v, u) => v == null ? '–' : u === 'B' ? fmtB(v) : u === 's' ? fmtT(v) : v + (u ? ' ' + u : '');
+
+async function getJSON(url) {
+  try { const r = await fetch(url, { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch (e) { return null; }
+}
+async function listing(dir) {                       // [name, folder?] from the server.js listing page
+  try {
+    const r = await fetch(dir, { cache: 'no-cache' });
+    if (!r.ok) return [];
+    const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+    return [...doc.querySelectorAll('a')].map(a => decodeURIComponent(a.getAttribute('href') || '')).filter(h => h && !h.startsWith('?'))
+      .map(h => h.endsWith('/') ? [h.slice(0, -1), true] : [h, false]).filter(([n]) => !n.includes('/'));
+  } catch (e) { return []; }
+}
+async function control(cmd, disk) {
+  try {
+    const r = await fetch('control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd, disk }) });
+    return await r.json();
+  } catch (e) { return { ok: false, error: 'viewer not reachable' }; }
+}
+
+// ---------------------------------------------------------------- light / dark theme (system preference, or saved choice)
+function applyTheme(t) { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }
+applyTheme(store.get('theme'));
+$('themebtn').onclick = () => {
+  const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const t = dark ? 'light' : 'dark'; applyTheme(t); store.set('theme', t);
+};
+if (window.VIEW_PLAYER) $('cmdline').textContent = `lab64 play ${window.VIEW_PLAYER} <file | --bare>\nlab64 play x64sc <options>`;
+if (window.VIEW_TITLE) { $('proj').textContent = window.VIEW_TITLE; document.title = window.VIEW_TITLE + ' · C64 control center'; }
+
+// ---------------------------------------------------------------- versions (manifest.json)
+let VERS = [], PAGE = null, PLAYER = null;
+const groupLabel = (m, g) => (m.groups && m.groups[g]) || g;
+
+async function loadVersions() {
+  const pages = (await listing('out/cache/vc64web/')).map(([n]) => n).filter(n => /^VirtualC64-v\d+\.html$/.test(n)).sort(natural);
+  PAGE = pages.length ? 'out/cache/vc64web/' + pages[pages.length - 1] : null;
+  const dirs = (await listing('out/releases/')).filter(([n, d]) => d && /^v/.test(n)).map(([n]) => n);
+  const latestFiles = (await listing('out/releases/latest/')).map(([n]) => n);
+  const vs = await Promise.all(dirs.map(async d => {
+    const m = await getJSON('out/releases/' + encodeURIComponent(d) + '/manifest.json');
+    const disks = m ? Object.keys(m.files || {}).filter(f => /\.d64$/i.test(f)) : (await listing('out/releases/' + encodeURIComponent(d) + '/')).map(([n]) => n).filter(n => /\.d64$/i.test(n));
+    return { dir: d, m, disks };
+  }));
+  for (const v of vs) v.latest = v.disks.length > 0 && v.disks.every(f => latestFiles.includes(f));    // "latest" = same disks as the link
+  if (vs.filter(v => v.latest).length > 1) for (const v of vs) v.latest = false;
+  vs.sort((a, b) => natural(b.dir, a.dir));
+  const loose = (await listing('out/')).filter(([n, d]) => !d && /\.d64$/i.test(n) && n !== 'disk.d64').map(([n]) => n);
+  VERS = vs; LOOSE = loose;
+  render();
+}
+let LOOSE = [];
+function vcLink(path) { return PAGE ? PAGE + '?disk=' + encodeURIComponent('/out/' + path) : null; }
+
+function headerLine() {
+  const l = VERS.find(v => v.latest) || VERS[0], m = l && l.m, t = m && m.tests;
+  $('sub').innerHTML = !l ? 'no version in out/releases/' :
+    `latest <b>${esc(l.dir)}</b> · ${t && t.ran ? (t.fail ? `<span style="color:#ff9a85">${t.fail} test FAIL</span>` : `${t.pass}/${t.total} test PASS`) : 'tests not run'}` +
+    (m && m.built_at ? ' · ' + esc(fmtD(m.updated_at || m.built_at)) : '');
+  const bare = $('vcbare'), dl = $('vcdl');
+  if (PAGE) { bare.href = PAGE; dl.href = PAGE; dl.setAttribute('download', PAGE.split('/').pop()); }
+  else { for (const a of [bare, dl]) { a.removeAttribute('href'); a.removeAttribute('download'); a.title = 'vc64web page not available (is the vc64web container running? lab64 up vc64web)'; } }
+}
+
+function card(v) {
+  const m = v.m || {}, st = m.stats || {}, t = m.tests || {}, g = st.git || {}, base = 'out/releases/' + encodeURIComponent(v.dir) + '/';
+  const disk = v.disks[0], diskPath = disk ? 'releases/' + v.dir + '/' + disk : null;
+  const chips = [];
+  if (v.latest) chips.push('<span class="tag blue">latest</span>');
+  if (m.release) chips.push('<span class="tag ok">release</span>');
+  if (m.branch && m.branch !== 'main' && m.branch !== 'master') chips.push(`<span class="tag warn">branch ${esc(m.branch)}</span>`);
+  if (t.ran) chips.push(t.fail ? `<span class="tag bad">${t.fail} FAIL / ${t.total}</span>` : `<span class="tag ok">${t.pass}/${t.total} PASS${t.skip ? ' · ' + t.skip + ' SKIP' : ''}</span>`);
+  else if (v.m) chips.push('<span class="tag">tests not run</span>');
+  if (t.ran && t.suites) chips.push(`<span class="tag">${esc(t.suites.join(' + '))}</span>`);
+  if (g.dirty) chips.push('<span class="tag warn" title="the build contained changes not yet committed">uncommitted</span>');
+  const playing = PLAYER && PLAYER.running && PLAYER.disk === diskPath;
+  const acts = [];
+  if (diskPath) {
+    const u = vcLink(diskPath);
+    acts.push(u ? `<a class="key dark" href="${esc(u)}" target="_blank">▶ vc64web</a>` : '<button disabled title="vc64web page not available (lab64 up vc64web)">vc64web</button>');
+    acts.push(`<button data-play="${esc(diskPath)}" ${PLAYER === false ? 'disabled title="player not running"' : ''}>${playing ? '■ VICE running' : '▶ VICE live'}</button>`);
+    acts.push(`<a class="key" href="${esc(base + encodeURIComponent(disk))}" download>↓ .d64</a>`);
+  }
+  if (v.m) acts.push(`<a class="key" href="${esc(base + 'manifest.json')}" target="_blank">manifest</a>`);
+  const kv = [];
+  const add = (label, val, title) => kv.push(`<div title="${esc(title || '')}"><b>${esc(val)}</b><span>${esc(label)}</span></div>`);
+  for (const x of st.metrics || []) add(x.label, fmtUnit(x.value, x.unit), x.hint);
+  if (st.disk) add('free disk blocks', st.disk.blocks_free + ' / ' + st.disk.blocks_total);
+  if (st.build_seconds != null) add('build time', fmtT(st.build_seconds));
+  if (t.ran) add('test time', fmtT(t.seconds));
+  const files = Object.entries(m.files || {}).sort((a, b) => natural(a[1].group, b[1].group) || natural(a[0], b[0]));
+  let rows = files.map(([f, x]) => {
+    const href = base + encPath(f) + (x.type === 'dir' ? '/' : '');
+    const sid = x.kind === 'sid' || /\.sid$/i.test(f) ? ` <a class="key" href="sid.html?src=${esc(encodeURIComponent(href))}" target="_blank" title="listen with the SID player (jsSID)">♪ play</a>` : '';
+    return `<tr><td>${esc(groupLabel(m, x.group))}</td><td><a class="mono" href="${esc(href)}" target="_blank">${esc(f)}${x.type === 'dir' ? '/' : ''}</a>${x.type === 'dir' ? ` <span class="dim small">(${x.files} file)</span>` : ''}${sid}</td>` +
+      `<td class="num">${fmtB(x.bytes)}</td><td class="dim small">${esc(fmtD(x.produced))}</td><td class="mono dim" title="SHA-256 ${esc(x.sha256)}">${esc((x.sha256 || '').slice(0, 10))}</td></tr>`;
+  }).join('');
+  rows += (m.missing || []).map(gp => `<tr class="missing"><td>${esc(groupLabel(m, gp))}</td><td colspan="4">not generated in this version</td></tr>`).join('');
+  if (!v.m) rows = v.disks.map(f => `<tr><td>disk</td><td><a class="mono" href="${esc(base + encodeURIComponent(f))}">${esc(f)}</a></td><td colspan="3" class="dim">no manifest.json</td></tr>`).join('');
+  const info = (st.info || []).map(x => ' · ' + esc(x.label) + ' ' + esc(x.value)).join('');
+  const dirList = st.disk && st.disk.files ? `<details><summary>Disk directory (${st.disk.files.length} files, ${st.disk.blocks_used} blocks used)</summary><div class="tablewrap">
+      <table><tr><th>Name</th><th>Type</th><th class="num">Blocks</th></tr>${st.disk.files.map(f => `<tr><td class="mono">${esc(f.name)}</td><td class="mono">${esc(f.type)}</td><td class="num">${f.blocks}</td></tr>`).join('')}</table></div></details>` : '';
+  const testDet = t.ran ? `<details data-tests="${esc(base + 'test_report.json')}"><summary>Tests: ${t.fail ? 'FAIL details' : 'list'} (${t.total})</summary><div class="small dim">loading...</div></details>` : '';
+  return `<div class="card${v.latest ? ' latest' : ''}">
+    <div class="head"><h3>${esc(v.dir)}</h3><div class="chips">${chips.join('')}</div></div>
+    <div class="meta" style="margin-top:4px">${m.built_at ? 'build ' + esc(fmtD(m.built_at)) : ''}${m.updated_at && m.updated_at !== m.built_at ? ' · updated ' + esc(fmtD(m.updated_at)) : ''}${
+      g.commit ? ` · commit ${esc(g.commit)} <span style="font-family:var(--sans)">${esc(g.subject || '')}</span>` : ''}${info}</div>
+    <div class="actions">${acts.join('')}</div>
+    ${kv.length ? `<div class="kv">${kv.join('')}</div>` : ''}
+    <div class="tablewrap"><table><tr><th>Artifact</th><th>File</th><th class="num">Size</th><th>Produced</th><th>SHA-256</th></tr>${rows}</table></div>
+    ${dirList}${testDet}
+  </div>`;
+}
+
+function render() {
+  let html = VERS.map(card).join('');
+  if (LOOSE.length) html += `<section><h2>Disks in out/</h2>${LOOSE.map(f => {
+    const u = vcLink(f);
+    return `<div class="actions"><span class="mono">${esc(f)}</span>${u ? `<a class="key" href="${esc(u)}" target="_blank">vc64web</a>` : ''}<button data-play="${esc(f)}">VICE live</button></div>`;
+  }).join('')}</section>`;
+  $('cards').innerHTML = html || '<section class="dim">No version in out/releases/</section>';
+  // SID Studio opens on the music of the newest version that has it (else empty: the user adds his own .sid files)
+  const sv = VERS.find(v => Object.values(v.m?.files || {}).some(x => x.kind === 'sid'));
+  const sf = sv && Object.entries(sv.m.files).find(([, x]) => x.kind === 'sid')[0];
+  $('sidstudio').href = sf ? 'sid.html?src=' + encodeURIComponent('out/releases/' + sv.dir + '/' + sf + '/') : 'sid.html';
+  renderTrends(); renderCompareSelects(); headerLine(); loadMine();
+}
+
+// test details of a version, loaded when opened
+document.addEventListener('toggle', async e => {
+  const d = e.target;
+  if (!(d instanceof HTMLDetailsElement) || !d.open || !d.dataset.tests || d.dataset.loaded) return;
+  d.dataset.loaded = 1;
+  const r = await getJSON(d.dataset.tests), box = d.querySelector('div');
+  if (!r) { box.textContent = 'report not found'; return; }
+  const res = r.results || [], bad = res.filter(x => x.result !== 'PASS');
+  const show = bad.length ? bad : res;
+  box.outerHTML = `<div class="tablewrap"><table><tr><th>ID</th><th>Suite</th><th>Result</th><th class="num">Time</th><th>Test / reason</th></tr>${show.map(x =>
+    `<tr><td class="mono">${esc(x.id)}</td><td>${esc(x.suite)}</td><td><span class="tag ${x.result === 'PASS' ? 'ok' : x.result === 'FAIL' ? 'bad' : ''}">${esc(x.result)}</span></td>` +
+    `<td class="num">${x.time.toFixed(2)} s</td><td>${esc(x.desc)}${x.reason ? `<div class="small" style="color:var(--bad)">${esc(x.reason)}</div>` : ''}</td></tr>`).join('')}</table></div>` +
+    (bad.length ? `<p class="small dim">${res.length - bad.length} PASS not shown.</p>` : '');
+}, true);
+
+// VICE buttons
+document.addEventListener('click', async e => {
+  const bb = e.target.closest('button[data-basic]');
+  if (bb) {
+    bb.disabled = true;
+    const r = await control('basic');
+    bb.disabled = false;
+    if (!r.ok) alertBox(r.error); else showBig(true);
+    return pollPlayer();
+  }
+  const b = e.target.closest('button[data-play]');
+  if (!b) return;
+  const disk = b.dataset.play, stop = PLAYER && PLAYER.running && PLAYER.disk === disk;
+  b.disabled = true;
+  const r = await control(stop ? 'stop' : 'play', stop ? undefined : disk);
+  if (!r.ok) alertBox(r.error); else if (!stop) showBig(true);
+  await pollPlayer(); render();
+});
+function alertBox(msg) { $('player').insertAdjacentHTML('beforeend', `<div class="msg">${esc(msg)}</div>`); }
+
+// ---------------------------------------------------------------- measures: the project's (stats.metrics) and the common ones
+function sparkline(vals) {
+  const w = 160, h = 32, n = vals.length, lo = Math.min(...vals), hi = Math.max(...vals), sp = hi - lo || 1;
+  const pts = vals.map((v, i) => [n === 1 ? w / 2 : i * w / (n - 1), h - 3 - (v - lo) / sp * (h - 6)]);
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="var(--red)" stroke-width="2" vector-effect="non-scaling-stroke"/>` +
+    pts.map((p, i) => `<rect x="${p[0] - (i === n - 1 ? 3 : 2)}" y="${p[1] - (i === n - 1 ? 3 : 2)}" width="${i === n - 1 ? 6 : 4}" height="${i === n - 1 ? 6 : 4}" fill="${i === n - 1 ? 'var(--r5)' : 'var(--ink)'}"/>`).join('') + '</svg>';
+}
+function metrics() {                    // [id, label, value(v), unit, better(+1 up, -1 down, 0)]
+  const ids = new Map();
+  for (const v of [...VERS].reverse()) for (const x of v.m?.stats?.metrics || []) ids.set(x.id, [x.label, x.unit, x.better === 'up' ? 1 : x.better === 'down' ? -1 : 0]);
+  const out = [...ids].map(([id, [label, unit, better]]) => [id, label, v => (v.m?.stats?.metrics || []).find(x => x.id === id)?.value, unit, better]);
+  const suites = (VERS.find(v => v.m?.tests?.ran)?.m.tests.suites || []).join(' + ');
+  out.push(['_blocks', 'free disk blocks', v => v.m?.stats?.disk?.blocks_free, '', 1]);
+  out.push(['_build', 'build time', v => v.m?.stats?.build_seconds, 's', -1]);
+  if (suites) out.push(['_tests', 'test time (' + suites + ')', v => (v.m?.tests?.ran && (v.m.tests.suites || []).join(' + ') === suites) ? v.m.tests.seconds : undefined, 's', -1]);
+  return out;
+}
+function renderTrends() {
+  const old = [...VERS].reverse();
+  const out = metrics().map(([, label, get, unit]) => {
+    const pts = old.map(v => [v.dir, get(v)]).filter(([, x]) => x != null);
+    if (!pts.length) return '';
+    const vals = pts.map(p => p[1]);
+    return `<div title="${esc(pts.map(([d, x]) => d + ': ' + fmtUnit(x, unit)).join('\n'))}">${esc(label)}<br><b>${esc(fmtUnit(vals[vals.length - 1], unit))}</b>` +
+      ` <span class="small">(${pts.length > 1 ? esc(pts[0][0]) + ' → ' : ''}${esc(pts[pts.length - 1][0])})</span>${sparkline(vals)}</div>`;
+  }).join('');
+  $('trendbox').hidden = !out; $('trends').innerHTML = out;
+}
+
+// ---------------------------------------------------------------- comparison
+function renderCompareSelects() {
+  const ms = VERS.filter(v => v.m);
+  $('cmpbox').hidden = ms.length < 2;
+  if (ms.length < 2) return;
+  const a = $('cmpA').value, b = $('cmpB').value;
+  const opts = ms.map(v => `<option>${esc(v.dir)}</option>`).join('');
+  $('cmpA').innerHTML = opts; $('cmpB').innerHTML = opts;
+  $('cmpA').value = ms.some(v => v.dir === a) ? a : ms[1].dir;
+  $('cmpB').value = ms.some(v => v.dir === b) ? b : ms[0].dir;
+  compare();
+}
+async function compare() {
+  const A = VERS.find(v => v.dir === $('cmpA').value), B = VERS.find(v => v.dir === $('cmpB').value);
+  if (!A || !B) return;
+  const row = (label, get, unit, better) => {
+    const x = get(A), y = get(B);
+    if (x == null && y == null) return '';
+    let d = '';
+    if (typeof x === 'number' && typeof y === 'number' && x !== y) {
+      const good = better ? (y - x) * better > 0 : null, dv = y - x;
+      d = `<span class="${good === null ? '' : good ? 'up' : 'down'}">${dv > 0 ? '+' : ''}${unit === 's' ? dv.toFixed(1) + ' s' : unit === 'B' ? dv + ' B' : Number.isInteger(dv) ? dv : dv.toFixed(1)}</span>`;
+    } else if (x != null && y != null && x !== y) d = '<span class="dim">changed</span>';
+    return `<tr><td>${esc(label)}</td><td class="num">${esc(unit === undefined ? (x ?? '–') : fmtUnit(x, unit))}</td><td class="num">${esc(unit === undefined ? (y ?? '–') : fmtUnit(y, unit))}</td><td class="num">${d}</td></tr>`;
+  };
+  let h = `<div class="tablewrap"><table><tr><th>Measure</th><th class="num">${esc(A.dir)}</th><th class="num">${esc(B.dir)}</th><th class="num">Difference</th></tr>`;
+  h += metrics().map(([, l, g, u, b]) => row(l, g, u, b)).join('');
+  h += row('commit', v => v.m?.stats?.git?.commit);
+  const infoLabels = [...new Set([A, B].flatMap(v => (v.m.stats?.info || []).map(x => x.label)))];
+  for (const l of infoLabels) h += row(l, v => (v.m.stats?.info || []).find(x => x.label === l)?.value);
+  h += '</table></div>';
+  const fa = Object.fromEntries((A.m.stats?.disk?.files || []).map(f => [f.name, f.blocks])), fb = Object.fromEntries((B.m.stats?.disk?.files || []).map(f => [f.name, f.blocks]));
+  const names = [...new Set([...Object.keys(fa), ...Object.keys(fb)])].filter(n => fa[n] !== fb[n]);
+  if (A.m.stats?.disk && B.m.stats?.disk) h += `<details><summary>Disk files with a different size (${names.length})</summary>` + (names.length ? `<div class="tablewrap"><table><tr><th>File</th><th class="num">${esc(A.dir)}</th><th class="num">${esc(B.dir)}</th></tr>` +
+    names.map(n => `<tr><td class="mono">${esc(n)}</td><td class="num">${fa[n] ?? '–'}</td><td class="num">${fb[n] ?? '–'}</td></tr>`).join('') + '</table></div>' : '<p class="small dim">none</p>') + '</details>';
+  const [ra, rb] = await Promise.all([A, B].map(v => v.m.tests?.ran ? getJSON('out/releases/' + encodeURIComponent(v.dir) + '/test_report.json') : null));
+  if (ra && rb) {
+    const ia = Object.fromEntries(ra.results.map(x => [x.id, x])), ib = Object.fromEntries(rb.results.map(x => [x.id, x]));
+    const ids = [...new Set([...Object.keys(ia), ...Object.keys(ib)])];
+    const changed = ids.filter(i => (ia[i]?.result) !== (ib[i]?.result));
+    const slower = ids.filter(i => ia[i] && ib[i]).map(i => [i, ib[i].time - ia[i].time]).filter(([, d]) => Math.abs(d) >= 0.5).sort((p, q) => q[1] - p[1]).slice(0, 8);
+    h += `<details ${changed.length ? 'open' : ''}><summary>Tests with a different result (${changed.length})</summary>` + (changed.length ? `<div class="tablewrap"><table><tr><th>ID</th><th>${esc(A.dir)}</th><th>${esc(B.dir)}</th></tr>` +
+      changed.map(i => `<tr><td class="mono">${esc(i)}</td><td>${esc(ia[i]?.result || 'missing')}</td><td>${esc(ib[i]?.result || 'missing')}</td></tr>`).join('') + '</table></div>' : '<p class="small dim">none</p>') + '</details>';
+    if (slower.length) h += `<details><summary>Tests whose time changed by at least 0.5 s (${slower.length})</summary><div class="tablewrap"><table><tr><th>ID</th><th class="num">${esc(A.dir)}</th><th class="num">${esc(B.dir)}</th><th class="num">Difference</th></tr>` +
+      slower.map(([i, d]) => `<tr><td class="mono">${esc(i)}</td><td class="num">${ia[i].time.toFixed(2)} s</td><td class="num">${ib[i].time.toFixed(2)} s</td><td class="num ${d > 0 ? 'down' : 'up'}">${d > 0 ? '+' : ''}${d.toFixed(2)} s</td></tr>`).join('') + '</table></div></details>';
+    if ((ra.suites || []).join() !== (rb.suites || []).join()) h += `<p class="small dim">Different suites (${esc((ra.suites || []).join('+'))} / ${esc((rb.suites || []).join('+'))}): tests present in only one show as "missing".</p>`;
+  } else h += '<p class="small dim">Test comparison: both versions need the report.</p>';
+  $('cmp').innerHTML = h;
+}
+$('cmpA').onchange = compare; $('cmpB').onchange = compare;
+
+// ---------------------------------------------------------------- live status
+let lastBuild = null, lastTestsState = null;
+async function pollStatus() {
+  const b = await getJSON('out/tmp/build.json'), t = await getJSON('out/tmp/tests.json');
+  if (!b) $('build').innerHTML = '<div class="dim">no build recorded</div>';
+  else {
+    const lbl = { running: 'RUNNING', ok: 'SUCCEEDED', fail: 'FAILED' }[b.state] || b.state;
+    const dur = (b.state === 'running' ? Date.now() / 1000 : b.updated) - b.started;
+    $('build').innerHTML = `<div class="state"><span class="led ${esc(b.state)}"></span>${esc(lbl)}</div>` +
+      `<div style="margin-top:6px">${b.state === 'running' ? 'phase <span class="tag">' + esc(b.phase) + '</span>' : b.state === 'fail' ? 'failed in phase <span class="tag bad">' + esc(b.phase) + '</span>' : 'completed'} · ${fmtT(dur)}</div>` +
+      `<div class="meta" style="margin-top:6px">build ${esc(b.flags || '')}<br>${b.state === 'running' ? 'started ' + ago(b.started) : 'finished ' + ago(b.updated)}</div>`;
+    if (lastBuild && lastBuild.state === 'running' && b.state !== 'running') loadVersions();
+    lastBuild = b;
+  }
+  if (!t) $('tests').innerHTML = '<div class="dim">no run recorded</div>';
+  else {
+    const res = t.results || [], n = k => res.filter(x => x.result === k).length, fail = n('FAIL'), pass = n('PASS'), skip = n('SKIP');
+    const st = t.state === 'aborted' || (t.state === 'running' && b && b.state !== 'running' && b.updated > t.updated) ? 'fail' : t.state;   // tests interrupted halfway (aborted: Ctrl-C or engine error)
+    const lbl = { running: 'RUNNING', ok: 'PASSED', fail: st !== t.state ? 'INTERRUPTED' : 'FAILED' }[st] || st;
+    const w = k => t.total ? (k / t.total * 100).toFixed(2) + '%' : '0';
+    const cur = t.current ? `<div class="meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px" title="${esc(t.current.desc)}">▶ ${esc(t.current.id)} · ${esc(t.current.desc)}</div>` : '';
+    const recent = res.slice().reverse().filter(x => x.result !== 'PASS').concat(res.slice(-6).reverse().filter(x => x.result === 'PASS')).slice(0, 12);
+    $('tests').innerHTML = `<div class="state"><span class="led ${esc(st)}"></span>${esc(lbl)}</div>` +
+      `<div class="meta" style="margin-top:2px">${esc((t.suites || []).join(' + '))}${t.filter && t.filter.length ? ' -k ' + esc(t.filter.join(' ')) : ''}</div>` +
+      `<div class="bar"><i style="width:${w(pass)};background:var(--ok)"></i><i style="width:${w(fail)};background:var(--bad)"></i><i style="width:${w(skip)};background:var(--ink2)"></i></div>` +
+      `<div class="meta">${res.length}/${t.total} · <span class="up">${pass} PASS</span> · <span class="${fail ? 'down' : ''}">${fail} FAIL</span> · ${skip} SKIP · ${fmtT(t.seconds ?? (Date.now() / 1000 - t.started))}</div>` +
+      cur + (t.caps && t.caps.length ? `<div class="small down">${esc(t.caps.join('; '))}</div>` : '') +
+      `<div class="results">${recent.map(x => `<div title="${esc(x.desc + (x.reason ? ' -> ' + x.reason : ''))}"><span class="${x.result === 'FAIL' ? 'down' : x.result === 'PASS' ? 'up' : 'dim'}">${esc(x.result.padEnd(4))}</span> ${esc(x.id)} <span class="dim">${esc(x.reason || x.desc)}</span></div>`).join('')}</div>`;
+    if (t.state === 'running' && lastTestsState !== 'running' && lastTestsState !== null) miniOpen(true);   // tests started: the thumbnail opens
+    lastTestsState = t.state;
+  }
+}
+async function pollPlayer() {
+  const r = await control('status');
+  const was = JSON.stringify(PLAYER);
+  if (!r.ok) {
+    PLAYER = false;
+    $('player').innerHTML = `<div class="state"><span class="led"></span>NOT AVAILABLE</div><div class="meta" style="margin-top:6px">${esc(r.error)}</div>`;
+  } else {
+    PLAYER = r;
+    $('player').innerHTML = r.running
+      ? `<div class="state"><span class="led running"></span>RUNNING</div><div class="meta" style="margin-top:6px;word-break:break-all">${r.disk ? esc(r.disk) : 'no disk (READY.)'}</div><div class="meta">since ${ago(r.since)}</div>` +
+        `<div class="actions"><button id="plive" class="dark">▶ Play / try</button><button id="pstop" class="warnk">■ Close</button></div>`
+      : `<div class="state"><span class="led"></span>STOPPED</div><div class="note" style="margin-top:6px">"VICE live" on a version or "Empty VICE" below: real speed, audio, keyboard and joysticks from the browser.</div>`;
+    if ($('pstop')) $('pstop').onclick = async () => { await control('stop'); await pollPlayer(); };
+    if ($('plive')) $('plive').onclick = () => showBig(true);
+  }
+  if (was !== JSON.stringify(PLAYER) && VERS.length) render();
+}
+
+// ---------------------------------------------------------------- live screen
+// thumbnail: KasmVNC client view-only and scaled (resize=scale: the screen resolution does not change); a click opens the big
+// window = live.html (interactive). With the big one open, the thumbnail disconnects (one VNC connection at a time from this page).
+const MINI_URL = 'vnc/index.html?autoconnect=1&resize=scale&view_only=1&show_control_bar=false&reconnect=1&reconnect_delay=2000';
+function miniOn(on) {
+  const fr = document.querySelector('#mini .frame'), ifr = fr.querySelector('iframe');
+  if (on && !ifr) fr.insertAdjacentHTML('afterbegin', `<iframe src="${MINI_URL}" title="live screen (thumbnail)" tabindex="-1"></iframe>`);
+  if (!on && ifr) ifr.remove();
+}
+function miniOpen(open) {
+  $('mini').classList.toggle('closed', !open);
+  document.body.classList.toggle('pad', open);
+  $('minitog').textContent = open ? '–' : '+';
+  store.set('mini', open ? '1' : '0');
+  miniOn(open && !$('big').classList.contains('open'));
+}
+function showBig(on) {
+  const big = $('big'), win = big.querySelector('.win');
+  if (on && !big.classList.contains('open')) {
+    win.insertAdjacentHTML('beforeend', '<iframe src="live.html" allow="autoplay; clipboard-read; clipboard-write" title="live screen"></iframe>');
+    big.classList.add('open'); miniOn(false);
+    setTimeout(() => { const f = win.querySelector('iframe'); if (f) f.focus(); }, 300);
+  } else if (!on && big.classList.contains('open')) {
+    win.querySelector('iframe').remove(); big.classList.remove('open');
+    miniOn(!$('mini').classList.contains('closed'));
+  }
+}
+$('minihit').onclick = () => showBig(true);
+$('minibig').onclick = () => showBig(true);
+$('openbig').onclick = () => showBig(true);
+$('bigclose').onclick = () => showBig(false);
+$('minitog').onclick = () => miniOpen($('mini').classList.contains('closed'));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('big').classList.contains('open')) showBig(false); });
+miniOpen(store.get('mini') !== '0');
+
+// ---------------------------------------------------------------- try it yourself: files in out/tmp/
+async function loadMine() {
+  const f = (await listing('out/tmp/')).filter(([n, d]) => !d && /\.(d64|g64|prg|t64|crt)$/i.test(n)).map(([n]) => 'tmp/' + n);
+  $('mine').innerHTML = f.length ? '<div class="meta" style="margin-top:8px">Files in out/tmp/:</div>' + f.map(p => {
+    const u = vcLink(p);
+    return `<div class="actions" style="margin:6px 0"><span class="mono">${esc(p)}</span><button data-play="${esc(p)}">▶ VICE live</button>${u ? `<a class="key" href="${esc(u)}" target="_blank">vc64web</a>` : ''}</div>`;
+  }).join('') : '';
+}
+
+loadVersions();
+pollStatus(); pollPlayer();
+setInterval(() => { if (!document.hidden) { pollStatus(); pollPlayer(); } }, 2000);
+</script>
+</body>
+</html>

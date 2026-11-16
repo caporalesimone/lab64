@@ -1,0 +1,86 @@
+#!/usr/bin/env node
+// c64: command-line client of the c64d daemon.
+//   c64 [--port 7064] [--out FILE] method [arguments...]
+// Every argument is JSON (numbers, objects, true/false) or a bare string. '@path' = file read by the client and passed as base64; '@@path' = text file (e.g. .lbl labels).
+// Results: strings printed as text, the rest as JSON. --out FILE saves the binary content (PNG screenshot, GIF, diskImage...).
+// Client commands: ping | quit | help | roms [filter] | rom KIND NAME | games [filter] | game NAME | regress save NAME [options] | regress check NAME|@@file.json [options] | regress list
+// Copyright (c) 2026 Simone Caporale
+const http = require('http'), fs = require('fs');
+let a = process.argv.slice(2), port = 7064, quiet = false, compact = false, out = null, outdir = null, host = process.env.C64_HOST_CLIENT || '127.0.0.1';
+for (let i = 0; i < a.length;) { if (a[i] === '--port') { port = +a[i + 1]; a.splice(i, 2); } else if (a[i] === '--quiet') { quiet = true; a.splice(i, 1); } else if (a[i] === '--compact') { compact = true; a.splice(i, 1); } else if (a[i] === '--host') { host = a[i + 1]; a.splice(i, 2); } else if (a[i] === '--outdir') { outdir = a[i + 1]; a.splice(i, 2); } else if (a[i] === '--out') { out = a[i + 1]; a.splice(i, 2); } else i++; }
+if (!a.length) { console.error('usage: c64 [--port N] [--out FILE] method [arguments...]   (c64 help = list of methods)'); process.exit(2); }
+const req = (method, url, body) => new Promise((ok, ko) => {
+  const r = http.request({ host, port, path: url, method, headers: { 'content-type': 'application/json' } }, res => { const c = []; res.on('data', d => c.push(d)); res.on('end', () => ok(JSON.parse(Buffer.concat(c).toString()))); });
+  r.on('error', e => ko(e)); if (body) r.write(JSON.stringify(body)); r.end();
+});
+const conv = s => { if (s.startsWith('@@') && fs.existsSync(s.slice(2))) return fs.readFileSync(s.slice(2), 'utf8'); if (s.length > 1 && s[0] === '@' && fs.existsSync(s.slice(1))) return fs.readFileSync(s.slice(1)).toString('base64'); try { return JSON.parse(s); } catch (e) { return s; } };
+(async () => {
+  let m = a[0], r, rargs = a.slice(1), isCheck = false, isSave = false;
+  if (m === 'regress') {
+    const sub = a[1]; rargs = a.slice(2);
+    if (sub === 'save') { m = 'regressSave'; isSave = true; } else if (sub === 'check') { m = 'regressCheck'; isCheck = true; } else if (sub === 'list') m = 'regressList';
+    else { console.error('usage: c64 regress save NAME [opts] | check NAME|@@file.json [opts] | list'); process.exit(2); }
+  }
+  if (m === 'video') {   // c64 video FILE.txt|FILE.js|N [JSON options] --out clip.mp4 : input script (.txt), in-page JS loop (.js) or N frames; ffmpeg on the daemon side
+    const src = rargs[0]; if (src === undefined) { console.error('usage: c64 --out clip.mp4 video FILE.txt|FILE.js|N [{"every":2,"scale":3,"crf":20,"fps":25}]'); process.exit(2); }
+    const o = rargs[1] ? JSON.parse(rargs[1]) : {};
+    if (/^\d+$/.test(src)) o.frames = +src; else if (/\.js$/i.test(src)) o.loop = fs.readFileSync(src, 'utf8'); else o.script = fs.readFileSync(src, 'utf8');
+    rargs = [JSON.stringify(o)];
+  }
+  if (m === 'script' || m === 'scriptCheck') { if (!rargs.length) { console.error('usage: c64 script FILE.txt [{"noWait":true}]   |   c64 scriptCheck FILE.txt'); process.exit(2); } if (m === 'script') m = 'runScript'; rargs[0] = '@@' + rargs[0]; }
+  if (m === 'rom' && !rargs.length) m = 'roms@api';   // API 18: `c64 rom` with no arguments = active user ROMs (roms() of the API); `c64 roms` = list of the ROM files found
+  if (m === 'roms@api') m = 'roms';
+  else if (m === 'roms' || m === 'rom') {   // third-party ROMs: c64 roms [filter] = list | c64 rom KIND NAME = load (KIND: kernal|basic|chargen|floppy; NAME = part of the file name); then c64 start
+    const path = require('path'), roots = [...String(process.env.C64_ROMS || '').split(':'), path.join(__dirname, '..', 'roms', 'vice-roms'), path.join(__dirname, '..', 'roms', 'open-roms')].filter(x => x && fs.existsSync(x));   // C64_ROMS = list of folders separated by ':' (Docker: /roms = extra ROMs, then those of the repo)
+    const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : /\.(bin|rom)$/i.test(e.name) ? [path.join(d, e.name)] : []);
+    const all = roots.flatMap(walk);
+    if (m === 'roms') { const f = rargs[0] ? String(rargs[0]).toLowerCase() : ''; all.filter(x => x.toLowerCase().includes(f)).forEach(x => console.log(path.basename(x) + '  (' + fs.statSync(x).size + ' bytes)  ' + path.relative(process.cwd(), x))); if (!all.length) console.error('no ROM found (searched in: ' + (roots.join(', ') || 'no folder') + ')'); return; }
+    let kind = rargs[0] === 'drive' ? 'floppy' : rargs[0]; const nm = String(rargs[1] || '').toLowerCase(); if (!kind || !nm) { console.error('usage: c64 rom kernal|basic|chargen|floppy NAME   (c64 roms = list)'); process.exit(2); }
+    const hit = all.filter(x => path.basename(x).toLowerCase() === nm || path.basename(x).toLowerCase().includes(nm));
+    if (hit.length !== 1) { console.error(hit.length ? 'ambiguous name: ' + hit.map(x => path.basename(x)).join(', ') : 'ROM not found: ' + nm); process.exit(1); }
+    m = 'loadRom'; rargs = [kind, '@' + hit[0], JSON.stringify({ name: path.basename(hit[0]) })];
+  }
+  if (m === 'games' || m === 'game') {   // c64 games [filter] = list of the game files (.d64 .g64 .prg .t64 .crt ...) in $C64_GAMES (default ./games, then <repo>/work/games, then /games in Docker) | c64 game NAME = attaches them (disk -> drive 8) or loads them (prg/t64/crt/...)
+    const path = require('path'), dir = process.env.C64_GAMES || [path.join(process.cwd(), 'games'), path.join(__dirname, '..', 'work', 'games'), '/games'].find(d => fs.existsSync(d)) || path.join(process.cwd(), 'games');   // order: $C64_GAMES, ./games, <repo>/work/games, /games (Docker)
+    if (!fs.existsSync(dir)) { console.error('games folder not found: ' + dir + ' (set C64_GAMES)'); process.exit(1); }
+    const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : /\.(d64|g64|d71|d81|nib|prg|p00|t64|tap|crt|vsf|zip)$/i.test(e.name) ? [path.join(d, e.name)] : []);
+    const all = walk(dir), f = rargs[0] ? String(rargs[0]).toLowerCase() : '';
+    if (m === 'games') { all.filter(x => path.relative(dir, x).toLowerCase().includes(f)).forEach(x => console.log(path.relative(dir, x) + '  (' + fs.statSync(x).size + ' byte)')); return; }
+    const hit = all.filter(x => path.basename(x).toLowerCase() === f || path.relative(dir, x).toLowerCase().includes(f));
+    if (!f || hit.length !== 1) { console.error(!f ? 'usage: c64 game NAME   (c64 games = list)' : hit.length ? 'ambiguous name: ' + hit.map(x => path.relative(dir, x)).join(', ') : 'file not found: ' + f); process.exit(hit.length > 1 || !f ? 2 : 1); }
+    const nm = path.basename(hit[0]); if (/\.(d64|g64|d71|d81|nib)$/i.test(nm)) { m = 'attach'; rargs = ['8', '@' + hit[0], nm]; } else { m = 'loadFile'; rargs = [nm, '@' + hit[0]]; }
+  }
+  if (m === 'docs') {   // local documentation (C64-API.md next to this script): c64 docs [title-word]
+    const f = [require('path').join(__dirname, 'C64-API.md'), require('path').join(__dirname, 'docs', 'C64-API.md'), require('path').join(__dirname, '..', 'docs', 'C64-API.md')].find(x => fs.existsSync(x)); if (!f) { console.error('C64-API.md not found (searched next to c64, in docs/ and in ../docs/)'); process.exit(1); }
+    const t = fs.readFileSync(f, 'utf8'); if (!rargs.length) { console.log(t); return; }
+    const parts = t.split(/^(?=## )/m).filter(p => p.split('\n')[0].toLowerCase().includes(String(rargs[0]).toLowerCase()));
+    if (!parts.length) { console.error('section not found'); process.exit(1); } console.log(parts.join('\n')); return;
+  }
+  if (m === 'sendText' && typeof rargs[0] === 'string') rargs[0] = rargs[0].replace(/\\n/g, '\n');   // from the shell '\n' arrives as two characters: it is turned into RETURN
+  try {
+    if (m === 'ping') r = await req('GET', '/ping');
+    else if (m === 'quit') r = await req('POST', '/quit');
+    else if (m === 'status') r = await req('GET', '/status');   // API 18: running job and progress (also while another client waits)
+    else if (m === 'abort') r = await req('POST', '/abort');   // API 18: interrupts the running job (does not go through the queue)
+    else { if (m === 'help') { m = 'methods'; } r = await req('POST', '/call', { method: m, args: rargs.map(conv) }); }
+  } catch (e) { console.error('daemon not reachable on 127.0.0.1:' + port + ' (start c64d.js)'); process.exit(3); }
+  const saveOutputs = o => {   // files produced by the script (screenshots, videos, recordings): written into --outdir (default: current folder); no data in the printed JSON
+    if (!o || !o.length) return; const dir = outdir || '.'; fs.mkdirSync(dir, { recursive: true });
+    for (const f of o) { const fn = require('path').join(dir, require('path').basename(f.name)); fs.writeFileSync(fn, f.data !== undefined ? Buffer.from(f.data, 'base64') : f.text); console.error('written ' + fn + ' (' + f.type + ')'); delete f.data; delete f.text; }
+  };
+  if (!r.ok) { saveOutputs(r.outputs); if (r.log && r.log.length) console.error(JSON.stringify(r.log)); console.error('ERROR ' + (r.code || '') + ': ' + r.error); process.exit(1); }
+  let v = r.value; if (v && v.outputs) saveOutputs(v.outputs);
+  if (isSave && out) { fs.writeFileSync(out, JSON.stringify(v)); console.log('baseline scritta in ' + out + ' (' + JSON.stringify(v).length + ' byte, hash ' + v.hash.hash + ')'); return; }
+  if (isSave) v = { name: v.name, cycles: v.cycles, hash: v.hash.hash, ram: v.ram.map(x => [x.from, x.to]), screen: !!v.screen };
+  if (isCheck) { if (v.screen && v.screen.image && out) { fs.writeFileSync(out, Buffer.from(v.screen.image.split(',')[1], 'base64')); delete v.screen.image; } console.log(JSON.stringify(v)); console.error(v.pass ? 'PASS' : 'FAIL: ' + v.reasons.join('; ')); process.exit(v.pass ? 0 : 1); }
+  if (out) {
+    let buf = null;
+    if (typeof v === 'string' && v.startsWith('data:')) buf = Buffer.from(v.split(',')[1], 'base64');
+    else if (v && typeof v === 'object' && typeof v.data === 'string') buf = Buffer.from(v.data, 'base64');
+    else if (typeof v === 'string') buf = Buffer.from(v, 'base64');
+    if (buf) { fs.writeFileSync(out, buf); console.log('written ' + out + ' (' + buf.length + ' bytes)'); return; }
+  }
+  if (v === undefined) return;
+  if (quiet) return;
+  console.log(typeof v === 'string' ? v : JSON.stringify(v, null, !compact && v && typeof v === 'object' && JSON.stringify(v).length > 100 ? 1 : 0));
+})();

@@ -1,0 +1,65 @@
+/* Lab64 manual theme "c64": the base look of a Commodore 64 instruction booklet (A5 pages, cream paper, red accents, dark
+   cover, monospace type). Copyright (c) 2026 - Simone Caporale
+   Used by containers/pdf-gen/c64manual.py (lab64 manual). A project changes it with its own CSS loaded AFTER this file (C64_MANUAL_THEME in
+   lab64.env, or theme= in c64manual.build): override the variables below for colours and type, add rules for its own elements,
+   or replace whole rules. C64_MANUAL_BASE=none drops this file (the project theme is then the whole style).
+   Page size: set by the generator after this file (format A5 by default; meta lab64:format, C64_MANUAL_FORMAT): @page size and
+   --page-w / --page-h. The values below are only the fallback.
+   Keys: <kbd>X</kbd> becomes an SVG key cap; its colours are --key-face, --key-ink and --key-shadow, read by the generator
+   from the LAST definition in the loaded CSS (SVG attributes cannot use var()). */
+:root {
+  --paper: #f3ead3; --ink: #2a2118; --accent: #8a1c14; --muted: #8a7a60; --soft: #6a5a40; --rule: #c9b98f; --note-bg: #fbf3e0;
+  --cover-bg: #14121c; --cover-ink: #f0e6c8; --cover-band: #c8501e; --cover-title: #f2a03a; --cover-shadow: #7a2410;
+  --cover-foot: #c9bd9c; --code-bg: #14121c; --code-ink: #7ee0a2; --shot-bg: #000;
+  --key-face: #fffaf0; --key-ink: #2a2118; --key-shadow: #2a2118;
+  --font: 'DejaVu Sans Mono', monospace; --size: 8pt;
+  --page-w: 148mm; --page-h: 210mm; --page-pad: 9mm 11mm 10mm; --band: 3mm;
+}
+@page { size: A5; margin: 0 }
+* { box-sizing: border-box }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact }
+body { margin: 0; font: var(--size)/1.34 var(--font); color: var(--ink); background: var(--paper) }
+
+/* pages: one div.page per page; the content that does not fit is cut (the generator reports it when it can) */
+.page { width: var(--page-w); height: var(--page-h); padding: var(--page-pad); page-break-after: always; position: relative;
+        overflow: hidden; background: var(--paper); border-top: var(--band) solid var(--accent) }
+.page:last-child { page-break-after: auto }
+.page::after { content: attr(data-n); position: absolute; bottom: 3.5mm; left: 0; right: 0; text-align: center; font-size: 7pt;
+               color: var(--muted) }
+
+/* cover: div.page.cover (not numbered) with h1, .sub lines, a .frame with a picture and .foot lines */
+.cover { background: var(--cover-bg); color: var(--cover-ink); border-top: var(--band) solid var(--cover-band); text-align: center }
+.cover::after { content: '' }
+.cover h1 { font-size: 27pt; line-height: 1.05; color: var(--cover-title); margin: 17mm 0 3mm; letter-spacing: 1px; border: 0;
+            text-shadow: 2px 2px var(--cover-shadow) }
+.cover .sub { letter-spacing: 3px; font-size: 8.5pt; margin-bottom: 7mm }
+.cover .frame { border: 1.5mm solid var(--cover-ink); margin: 6mm 4mm; padding: 0; background: var(--shot-bg) }
+.cover .frame img { width: 100%; display: block; image-rendering: pixelated }
+.cover .foot { font-size: 7.5pt; letter-spacing: 1px; color: var(--cover-foot); margin-top: 5mm }
+
+/* text */
+h1 { font-size: 14pt; color: var(--accent); margin: 0 0 3.5mm; padding-bottom: 1.5mm; border-bottom: 0.6mm solid var(--ink);
+     letter-spacing: .5px }
+h2 { display: inline-block; font-size: 8.6pt; background: var(--ink); color: var(--paper); padding: .6mm 2mm; margin: 3mm 0 1.6mm;
+     letter-spacing: .5px }
+p { margin: 0 0 2mm } ul { margin: 0 0 2mm; padding-left: 4.5mm } li { margin: 0 0 .6mm }
+small { font-size: 6.3pt; color: var(--soft) }
+kbd, svg.key { font-size: 7.4pt }
+svg.key { display: inline-block; margin: 0 .3mm; overflow: visible }
+code, .cmd { font: inherit }
+/* .cmd: what the player types on the C64 (LOAD"...",8) */
+.cmd { display: block; background: var(--code-bg); color: var(--code-ink); padding: 2mm 3mm; margin: 2mm 0; font-size: 9pt }
+
+/* tables, figures, screenshots (img.shot: a C64 screen, pixels kept sharp), columns, notes */
+table { border-collapse: collapse; width: 100%; margin: 1.5mm 0 3mm; font-size: 7.4pt }
+th { background: var(--ink); color: var(--paper); text-align: left; padding: .8mm 1.5mm; font-weight: normal }
+td { border-bottom: .2mm solid var(--rule); padding: .8mm 1.5mm; vertical-align: top }
+figure { margin: 2mm 0 3mm; text-align: center }
+figcaption { font-size: 6.8pt; color: var(--soft); font-style: italic; margin-top: 1mm }
+img.shot { width: 100%; max-height: 58mm; object-fit: contain; image-rendering: pixelated; border: .35mm solid var(--ink);
+           background: var(--shot-bg); display: block }
+img.sm { max-height: 44mm; width: auto; margin: 0 auto }
+img.half { width: 100%; image-rendering: pixelated; border: .35mm solid var(--ink); background: var(--shot-bg); display: block }
+.cols { display: flex; gap: 3mm } .cols > * { flex: 1; min-width: 0 }
+.note { border: .4mm solid var(--accent); background: var(--note-bg); padding: 1.8mm 2.5mm; margin: 2.5mm 0; font-size: 7.8pt }
+.note b.t { color: var(--accent); display: block; margin-bottom: .6mm; letter-spacing: .5px }
