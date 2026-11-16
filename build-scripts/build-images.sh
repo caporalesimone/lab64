@@ -18,6 +18,9 @@ TC=$(cd "$(dirname "$0")/.." && pwd)
 . "$TC/build-scripts/sources.conf"
 VER=$(cat "$TC/VERSION")
 DL="$TC/downloads"
+# the full output of every docker build goes to this file; on a failure its last lines are shown (a failed RUN prints its own log there)
+BUILD_LOG="${TMPDIR:-/tmp}/lab64-images.log"
+build_failed() { echo "image build failed; last lines of $BUILD_LOG:" >&2; tail -n 80 "$BUILD_LOG" >&2; exit 1; }
 FORCE=0; [ "${1:-}" = "--force" ] && { FORCE=1; shift; }
 NAMES="${*:-tools viewer vc64web pdf-gen}"
 SECRET=""; [ -n "${C64_CA_BUNDLE:-}" ] && SECRET="--secret id=ca,src=$C64_CA_BUNDLE"
@@ -63,13 +66,13 @@ target() {                             # docker build of a target of the Lab64 D
             fetch SIDPLAYFP "sidplayfp-$SIDPLAYFP_VERSION.tar.gz" ;;
     esac
     # shellcheck disable=SC2086
-    DOCKER_BUILDKIT=1 docker build -q $SECRET --target "$1" -t "$2:$VER" -t "$2:latest" \
+    DOCKER_BUILDKIT=1 docker build --progress=plain $SECRET --target "$1" -t "$2:$VER" -t "$2:latest" \
         --build-arg VICE_VERSION="$VICE_VERSION" --build-arg TASS64_VERSION="$TASS64_VERSION" --build-arg CC65_VERSION="$CC65_VERSION" \
         --build-arg CC1541_VERSION="$CC1541_VERSION" --build-arg ZX0_VERSION="$ZX0_VERSION" --build-arg KASMVNC_VERSION="$KASMVNC_VERSION" \
         --build-arg LIBRESIDFP_VERSION="$LIBRESIDFP_VERSION" --build-arg LIBSIDPLAYFP_VERSION="$LIBSIDPLAYFP_VERSION" --build-arg SIDPLAYFP_VERSION="$SIDPLAYFP_VERSION" \
         --build-arg WEASYPRINT_VERSION="$WEASYPRINT_VERSION" --build-arg JSSID_VERSION="$JSSID_VERSION" \
         --build-arg MATPLOTLIB_VERSION="$MATPLOTLIB_VERSION" --build-arg NUMPY_VERSION="$NUMPY_VERSION" \
-        --build-context downloads="$DL" --build-context roms="$TC/roms" --build-context viewer-src="$TC/containers/viewer" "$TC/docker" >/dev/null
+        --build-context downloads="$DL" --build-context roms="$TC/roms" --build-context viewer-src="$TC/containers/viewer" "$TC/docker" >"$BUILD_LOG" 2>&1 || build_failed
 }
 for n in $NAMES; do
     if [ $FORCE = 0 ] && have "$n"; then continue; fi
@@ -81,8 +84,8 @@ for n in $NAMES; do
     vc64web)
         vc64web_pages
         # shellcheck disable=SC2086
-        DOCKER_BUILDKIT=1 docker build -q $SECRET -t "lab64-vc64web:$VER" -t lab64-vc64web:latest --build-context pages="$TC/out/cache/vc64web" --build-context roms="$TC/roms" \
-            "$TC/containers/vc64web" >/dev/null ;;
+        DOCKER_BUILDKIT=1 docker build --progress=plain $SECRET -t "lab64-vc64web:$VER" -t lab64-vc64web:latest --build-context pages="$TC/out/cache/vc64web" --build-context roms="$TC/roms" \
+            "$TC/containers/vc64web" >"$BUILD_LOG" 2>&1 || build_failed ;;
     *) echo "unknown image: $n" >&2; exit 1 ;;
     esac
     echo "   lab64-$n:$VER $(docker image inspect -f '{{.Size}}' "lab64-$n:$VER" | awk '{printf "%.0f MB", $1/1e6}')"

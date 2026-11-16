@@ -64,8 +64,9 @@ FROM tools-builder AS cc65-build
 ARG CC65_VERSION
 COPY --from=downloads cc65-${CC65_VERSION}.tar.gz /src/
 RUN tar xzf cc65-${CC65_VERSION}.tar.gz && cd cc65-${CC65_VERSION} \
-    && make -j"$(nproc)" PREFIX=/opt/c64 > /src/make.log 2>&1 && make install PREFIX=/opt/c64 > /src/install.log 2>&1 \
-    || { tail -30 /src/*.log; exit 1; }
+    && make PREFIX=/opt/c64 > /src/make.log 2>&1 && make install PREFIX=/opt/c64 > /src/install.log 2>&1 \
+    || { tail -60 /src/*.log; exit 1; }
+# no -j: cc65's library makefiles race when many jobs run (failed with -j32, passes in series; about 1 minute more on 2 cores)
 # PREFIX=/opt/c64 is compiled into the programs (where cc65 / ld65 look for their libraries and configs): same path in the image
 RUN rm -rf /opt/c64/share/man /opt/c64/share/doc && mkdir -p /out /opt/c64/licenses \
     && cp cc65-${CC65_VERSION}/LICENSE /opt/c64/licenses/cc65 && cp -a /opt/c64/. /out/
