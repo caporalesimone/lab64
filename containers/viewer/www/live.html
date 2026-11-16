@@ -23,7 +23,12 @@
   .vol { display:flex; align-items:center; gap:6px; color:var(--fg); font:600 13px "DejaVu Sans Mono", ui-monospace, monospace; }
   .vol input { width:110px; accent-color:#f2c230; }
   .vol output { min-width:4.5ch; color:var(--acc); }
-  iframe { flex:1; border:0; width:100%; }
+  /* (17/11) zoom of the screen: the iframe gets 1/z of the space and is scaled up by z, so the remote screen (resize=remote) shrinks
+     to that size and everything on it (VICE too) looks z times bigger */
+  #scr { flex:1; position:relative; overflow:hidden; --z:1; }
+  #scr iframe { position:absolute; left:0; top:0; border:0; width:calc(100% / var(--z)); height:calc(100% / var(--z)); transform:scale(var(--z)); transform-origin:0 0; }
+  .zoom { display:flex; align-items:center; gap:6px; }
+  .zoom output { min-width:4.5ch; text-align:center; color:var(--acc); font:600 13px "DejaVu Sans Mono", ui-monospace, monospace; }
 
   /* overlay (14/11): C64 keyboard and joysticks over the screen, semi-transparent */
   #ov { position:fixed; inset:0; pointer-events:none; z-index:10; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; touch-action:none; }
@@ -60,9 +65,12 @@
   <button id="kbBtn" title="Commodore 64 keyboard over the screen">Keyboard</button>
   <button id="j1Btn" title="Joystick 1 over the screen (port 1)">Joy 1</button>
   <button id="j2Btn" title="Joystick 2 over the screen (port 2: the one most games use)">Joy 2</button>
+  <span class="zoom" title="Makes the screen (and VICE) bigger or smaller: the remote screen gets the size of the page divided by the zoom">
+    <button id="zOut" title="Smaller">&minus;</button><output id="zV">100%</output><button id="zIn" title="Bigger">+</button>
+  </span>
   <span id="st"></span>
 </header>
-<iframe src="vnc/index.html?autoconnect=1&amp;view_only=0&amp;resize=remote&amp;show_control_bar=true&amp;clipboard_up=true&amp;clipboard_down=true" allow="clipboard-read; clipboard-write"></iframe>
+<div id="scr"><iframe src="vnc/index.html?autoconnect=1&amp;view_only=0&amp;resize=remote&amp;show_control_bar=true&amp;clipboard_up=true&amp;clipboard_down=true" allow="clipboard-read; clipboard-write"></iframe></div>
 <div id="ov"><div id="kb"></div><div class="joy" id="j1"></div><div class="joy" id="j2"></div></div>
 <script>
 let ctx = null, ws = null, next = 0, rest = null, gain = null;
@@ -211,6 +219,19 @@ function fitJoy() { document.documentElement.style.setProperty('--kbh', document
 addEventListener('resize', fitJoy);
 document.getElementById('ov').addEventListener('contextmenu', e => e.preventDefault());
 
+// (17/11) screen zoom: buttons - / +, steps below, remembered in this browser (the page works without storage)
+(function () {
+  const steps = [100, 125, 150, 175, 200, 250, 300], scr = document.getElementById('scr'), out = document.getElementById('zV');
+  let i = 0;
+  try { const v = +localStorage.getItem('lab64.liveZoom'); if (steps.indexOf(v) >= 0) i = steps.indexOf(v); } catch (e) {}
+  function apply() {
+    scr.style.setProperty('--z', steps[i] / 100); out.textContent = steps[i] + '%';
+    try { localStorage.setItem('lab64.liveZoom', steps[i]); } catch (e) {}
+  }
+  document.getElementById('zIn').onclick = () => { if (i < steps.length - 1) { i++; apply(); } };
+  document.getElementById('zOut').onclick = () => { if (i > 0) { i--; apply(); } };
+  apply();
+})();
 </script>
 </body>
 </html>

@@ -66,6 +66,12 @@ mouse or a finger.
 
 ![On-screen joystick](screenshots/10-live-joystick.png)
 
+**Zoom (1.11):** the **− 100% +** buttons in the header of `live.html` (steps 100, 125, 150, 175, 200, 250, 300 %, remembered in the browser)
+scale the screen: the page gives the iframe 1/z of its space and scales it by z, so the remote screen (`resize=remote`) shrinks and everything on it looks
+z times bigger. **Limit:** a window on the screen does not shrink with it, so the zoom is useful only while the screen stays larger than the window (VICE opens
+at about 720×644: on a 1280×853 page up to about 125 %). The screen has no window manager, so a window is not resized later (VICE's full screen only hides its
+borders); give VICE the size at start (`-windowwidth` / `-windowheight`, the project's own player script).
+
 ## vc64web
 
 The **▶ vc64web** button of a version, or **Empty vc64web**: the emulator in the browser with the disk of that version already
