@@ -58,7 +58,7 @@ Owner: Simone Caporale (engineer). Read [README.md](README.md) first (overview a
 
 ## Git
 - Branch `main`. **One commit per concluded activity** (green builds of the projects + smoke and sanity), message in English: short
-  title + body with what and why, plus the session attribution lines. Author: **Simone Caporale `<caporalesimone@gmail.com>`**.
+  title + body with what and why, plus the `Co-Authored-By` line (never the `Claude-Session` link: owner's rule, 16/11). Author: **Simone Caporale `<caporalesimone@gmail.com>`**.
 - `git status` clean before delivering; never rewrite history unless the owner asks.
 - Out of git: `out/`, downloaded sources (`downloads/`), caches. The Commodore ROMs (`roms/vice-roms/{C64,DRIVES}`, **the only ROM
   folder**: every user of the ROMs takes them from there) are **not in git** (exact file names in `.gitignore`; folders pushed empty with `.gitkeep`). The
