@@ -27,7 +27,7 @@ From any folder (example with Lab64 in `~/repos/lab64`):
 
 ```sh
 ~/repos/lab64/cli/lab64 install       # or: .../cli/lab64 install /another/folder
-lab64 version                                   # prints: Lab64 1.13 (<lab64 folder>)
+lab64 version                                   # prints: Lab64 1.14 (<lab64 folder>)
 ```
 
 What it does, and nothing else: creates the folder if missing (default `~/.local/bin`), creates or replaces there a symbolic link

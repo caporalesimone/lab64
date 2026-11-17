@@ -53,6 +53,10 @@
   .joy { position:fixed; bottom:calc(14px + var(--kbh, 0px)); display:none; align-items:center; gap:14px; pointer-events:none; }
   .joy.show { display:flex; }
   #j1 { left:16px; } #j2 { right:16px; flex-direction:row-reverse; }
+  /* (1.14) keyboard and joysticks moved by the user: right button drag, or the Move button and any pointer; remembered */
+  #ov.moving #kb, #ov.moving .joy { outline:2px dashed #f2c230; outline-offset:3px; }
+  #ov.moving .key, #ov.moving .joy * { cursor:move; }
+  .moved { right:auto !important; bottom:auto !important; transform:none !important; }
   .joy .lbl { position:absolute; top:-18px; left:0; right:0; text-align:center; font:600 11px system-ui; color:#fff; opacity:.75; letter-spacing:.08em; }
   .base { position:relative; width:132px; height:132px; border-radius:50%; background:rgba(255,255,255,.14); border:2px solid rgba(255,255,255,.45); pointer-events:auto; touch-action:none; }
   .knob { position:absolute; left:50%; top:50%; width:58px; height:58px; margin:-29px 0 0 -29px; border-radius:50%; background:rgba(255,255,255,.38); border:2px solid rgba(255,255,255,.8); pointer-events:none; }
@@ -69,6 +73,7 @@
   <button id="kbBtn" title="Commodore 64 keyboard over the screen">Keyboard</button>
   <button id="j1Btn" title="Joystick 1 over the screen (port 1)">Joy 1</button>
   <button id="j2Btn" title="Joystick 2 over the screen (port 2: the one most games use)">Joy 2</button>
+  <button id="mvBtn" title="Move the keyboard and the joysticks: drag them (also with the right mouse button, at any time). Double click: back to their places">Move</button>
   <span class="zoom" title="Makes the screen (and VICE) bigger or smaller: the remote screen gets the size of the page divided by the zoom">
     <button id="zOut" title="Smaller">&minus;</button><output id="zV">100%</output><button id="zIn" title="Bigger">+</button>
   </span>
@@ -253,6 +258,39 @@ document.getElementById('ov').addEventListener('contextmenu', e => e.preventDefa
   document.getElementById('zIn').onclick = () => { if (i < steps.length - 1) { i++; apply(); } };
   document.getElementById('zOut').onclick = () => { if (i > 0) { i--; apply(); } };
   apply();
+})();
+
+// ---------- (1.14) move the keyboard and the joysticks: right button drag at any time, or Move (move mode) and any pointer;
+// the places stay in this browser (lab64.liveOverlayPos), a double click on Move puts them back
+(function () {
+  const K = 'lab64.liveOverlayPos', ids = ['kb', 'j1', 'j2'], ov = document.getElementById('ov'), mv = document.getElementById('mvBtn');
+  let pos = {}; try { pos = JSON.parse(localStorage.getItem(K) || '{}') || {}; } catch (e) { pos = {}; }
+  const save = () => { try { localStorage.setItem(K, JSON.stringify(pos)); } catch (e) { /* private window */ } };
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  function apply() {
+    for (const id of ids) {
+      const el = document.getElementById(id), p = pos[id];
+      if (p) { el.classList.add('moved'); el.style.left = clamp(p.x, 0, innerWidth - 60) + 'px'; el.style.top = clamp(p.y, 0, innerHeight - 40) + 'px'; }
+      else { el.classList.remove('moved'); el.style.left = ''; el.style.top = ''; }
+    }
+  }
+  const moving = () => ov.classList.contains('moving');
+  mv.onclick = () => { ov.classList.toggle('moving'); mv.classList.toggle('on', moving()); };
+  mv.ondblclick = () => { pos = {}; save(); apply(); ov.classList.remove('moving'); mv.classList.remove('on'); };
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    el.addEventListener('contextmenu', e => e.preventDefault());
+    el.addEventListener('pointerdown', e => {
+      if (!(e.button === 2 || moving())) return;               // otherwise the key / the stick works as usual
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top, t = e.target;
+      t.setPointerCapture(e.pointerId);
+      const m = ev => { pos[id] = { x: ev.clientX - dx, y: ev.clientY - dy }; apply(); };
+      const up = () => { t.removeEventListener('pointermove', m); t.removeEventListener('pointerup', up); t.removeEventListener('pointercancel', up); save(); };
+      t.addEventListener('pointermove', m); t.addEventListener('pointerup', up); t.addEventListener('pointercancel', up);
+    }, true);
+  }
+  addEventListener('resize', apply); apply();
 })();
 </script>
 </body>

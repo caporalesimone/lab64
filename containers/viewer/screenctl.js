@@ -6,5 +6,7 @@ if (!['on', 'off', 'status'].includes(arg)) { console.error('usage: screenctl.js
 const headers = { 'Content-Type': 'application/json' };
 if (process.env.VIEW_PASSWORD) headers.Authorization = 'Basic ' + Buffer.from('viewer:' + process.env.VIEW_PASSWORD).toString('base64');
 const opt = arg === 'status' ? { headers } : { method: 'POST', headers, body: JSON.stringify({ on: arg === 'on' }) };
-fetch('http://localhost:6080/screen', opt).then(r => r.json()).then(j => { console.log(j.on ? 'on' : 'off'); process.exit(j.ok ? 0 : 1); })
-  .catch(e => { console.error('screenctl: ' + e.message); process.exit(1); });
+// (1.14) retried for ~5 s: right after "lab64 view" the server may not listen yet
+const go = n => fetch('http://localhost:6080/screen', opt).then(r => r.json()).then(j => { console.log(j.on ? 'on' : 'off'); process.exit(j.ok ? 0 : 1); })
+  .catch(e => { if (n > 0) setTimeout(() => go(n - 1), 300); else { console.error('screenctl: ' + e.message); process.exit(1); } });
+go(16);
