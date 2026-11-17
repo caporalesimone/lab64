@@ -9,7 +9,7 @@ Copyright © 2026 - Simone Caporale
 |---|---|
 | `containers/tools/test/run.py` | test engine: suites `smoke`, `sanity`, `regression` in the project `tests/` (one folder per feature with a `cases.py`), `-k ID` or prefix (no suite: all suites), `--list`, `--md`; exit 2 on bad arguments or when nothing is selected; module `setup` / `teardown`, `CHAIN`; a setup that raises `Skip` skips its tests; duration caps from `C64_TEST_CAPS` (they do not depend on the order of the suites on the command line; suites always run in the order smoke, sanity, regression); report in `out/work/test_report.txt` / `.json`; live status in `out/tmp/tests.json` (viewer; `aborted` after Ctrl-C, exit 130, or an engine error); one run at a time (lock) |
 | `containers/tools/py/c64test.py` | test registry: `@test(ID, description)`, `check(cond, reason)`, `Skip`, `script(ID, description, argv)` (failure reason: output lines with FAIL / error / ERROR or a word of `C64_TEST_REASON_WORDS`) |
-| `containers/tools/py/vicemon.py` | VICE library: `ROMS_C64` / `ROMS` (ROM folders for project tools), `Vice` (x64sc with factory settings and all the ROMs of `roms/`, warp, remote monitor without fixed delays, `wait_boot` = waits for READY., then `Vice()` hands over the machine stopped in the monitor with commands and answers in step, memory, `call`, breakpoints, screenshots, run-time memory probe with `C64_MEMPROBE=1`, `probe_checkpoint()` between programs, `resume()` / `running`), `labels()` / `listing()` of the 64tass build, `ROM_ARGS`, `XRUN` |
+| `containers/tools/py/vicemon.py` | VICE library: `ROMS_C64` / `ROMS` (ROM folders for project tools), `Vice` (x64sc with factory settings and all the ROMs of `roms/`, warp, remote monitor without fixed delays, `wait_boot` = waits for READY., then `Vice()` hands over the machine stopped in the monitor with commands and answers in step, memory, `call`, breakpoints, screenshots, run-time memory probe with `C64_MEMPROBE=1`, `probe_checkpoint()` between programs, `resume()` / `running`), `labels(name="main")` / `listing(name="main")` of the 64tass build, `ROM_ARGS`, `XRUN`, (1.13) `free_port()` and `Vice().port` (one remote monitor port per VICE) |
 | `containers/tools/vice/vice_env.sh` | the same VICE options for bash scripts (`VROM`, `XRUN`): a project script loads it with `eval "$(lab64 vice-env)"` |
 | `containers/tools/vice/live.vicerc` | VICE settings of `lab64 vice` (joystick 1 on F13-F17, the keys of the overlay) |
 | `containers/common/py/psid.py` | writes `.sid` files (PSID v2): a C64 program with init / play addresses and title, author, released; `info(bytes)` reads the header of a PSID / RSID (name, author, subtunes, clock and SID model flags) |
@@ -30,3 +30,11 @@ next stop (a breakpoint). `resume()` (or a bare `cmd("x")`, `"exit"`, `"g [addr]
 the answer; `cmd()` knows it, waits for the real answer and strips the entry prompt, so `resume(); cmd("m 0400 0400")` returns the
 memory line, not an empty prompt. If the machine stopped by itself meanwhile (a breakpoint), there is no extra prompt and the
 flag is cleared. `go()`, `load()` and any command leave the flag cleared.
+
+## Changes for projects in 1.13
+
+- `c64test.test(ID, description)`: the old third argument `slow=` is gone (nothing read it): remove it from the calls.
+- `vicemon.labels()` / `listing()` without a name read `out/work/main.lbl` / `main.lst` (the files of the default build; before 1.13
+  `game`). A project that relied on the old default passes the name.
+- Every `Vice()` has its own remote monitor port: a project tool that starts `x64sc -remotemonitor` itself and connects to 6510 should use
+  `free_port()` (Python) or `$VMON` / `$VMON_PORT` of `eval "$(lab64 vice-env)"` (shell), and stop only its own VICE.

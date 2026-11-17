@@ -1,0 +1,13 @@
+# (1.13, TODO L25) exact versions of the Python packages of lab64-tools (pip install -c): the top-level ones are also in
+# build-scripts/sources.conf (MATPLOTLIB_VERSION, NUMPY_VERSION) and must match; the rest are their dependencies.
+# Regenerate after a version change: the venv's packages (python -c "import importlib.metadata ...", see docs/images.md).
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.68.0
+kiwisolver==1.5.1
+matplotlib==3.11.2
+numpy==2.5.4
+packaging==26.3
+pyparsing==3.3.3
+python-dateutil==4.0.0
+tzdata==2026.6

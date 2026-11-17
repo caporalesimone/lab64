@@ -72,6 +72,7 @@
        display:flex; flex-direction:column; position:relative; overflow:hidden; }
   .p.collapsed > :not(.ph) { display:none !important; }
   .p.drag-before { box-shadow:-6px 0 0 -2px var(--amber); } .p.drag-after { box-shadow:6px 0 0 -2px var(--amber); }
+  .p.drag-swap { outline:2px dashed var(--amber); outline-offset:-2px; }   /* (1.13) drop in the middle = swap the two panels */
   .p.dragging { opacity:.4; }
   .ph { display:flex; align-items:center; gap:6px; margin:0 0 6px; min-height:22px; }
   .p.collapsed .ph { margin:0; }
@@ -855,8 +856,11 @@ let LAY = (() => {                                        // stored layout, chec
 })();
 const panel = id => document.querySelector(`.p[data-id="${id}"]`);
 function applyLayout() {
-  const desk = $('desk');
-  for (const id of LAY.order) desk.appendChild(panel(id));
+  // (1.13) the page keeps its scroll position: re-appending the panels shrank the page for a moment and the browser jumped to the
+  // top (a panel resized at the bottom went out of view); the panels are moved only when the order really changed
+  const desk = $('desk'), y = window.scrollY;
+  const now = [...desk.querySelectorAll(':scope > .p')].map(e => e.dataset.id);
+  if (now.join() !== LAY.order.join()) for (const id of LAY.order) desk.appendChild(panel(id));
   for (const id of LAY.order) {
     const el = panel(id), [w, h] = LAY.size[id], c = !!LAY.collapsed[id];
     el.style.gridColumn = 'span ' + w; el.style.gridRow = 'span ' + (c ? 2 : 5 * h);
@@ -864,6 +868,7 @@ function applyLayout() {
     el.querySelector('.sz').textContent = w + '×' + h;
     el.querySelector('.col').textContent = c ? '▸' : '▾';
   }
+  if (window.scrollY !== y) window.scrollTo({ top: y, behavior: 'instant' });
   store.set('layout', LAY);
 }
 function setSize(id, wh) { LAY.size[id] = wh; LAY.collapsed[id] = false; applyLayout(); }
@@ -877,23 +882,33 @@ document.querySelectorAll('.p').forEach(el => {             // header controls a
     setSize(id, c[(k + (e.shiftKey ? c.length - 1 : 1)) % c.length]);
   };
   ph.querySelector('.col').onclick = () => { LAY.collapsed[id] = !LAY.collapsed[id]; applyLayout(); };
-  // move: drag the grip, drop before or after another panel (left / right half)
+  // move: drag the grip (or the title bar), drop on another panel: the middle half SWAPS the two (1.13), the left / right quarter puts
+  // it before / after that panel
   const grip = ph.querySelector('.grip');
+  const ttl = ph.querySelector('.ttl');                                 // the title works as a grip too
+  if (ttl) {
+    ttl.setAttribute('draggable', 'true'); ttl.style.cursor = 'grab';
+    ttl.addEventListener('dragstart', e => { e.dataTransfer.setData('text/x-lab64-panel', id); e.dataTransfer.effectAllowed = 'move'; el.classList.add('dragging'); });
+    ttl.addEventListener('dragend', () => { el.classList.remove('dragging'); document.querySelectorAll('.p').forEach(p => p.classList.remove('drag-before', 'drag-after', 'drag-swap')); });
+  }
   grip.addEventListener('dragstart', e => { e.dataTransfer.setData('text/x-lab64-panel', id); e.dataTransfer.effectAllowed = 'move'; el.classList.add('dragging'); });
-  grip.addEventListener('dragend', () => { el.classList.remove('dragging'); document.querySelectorAll('.p').forEach(p => p.classList.remove('drag-before', 'drag-after')); });
+  grip.addEventListener('dragend', () => { el.classList.remove('dragging'); document.querySelectorAll('.p').forEach(p => p.classList.remove('drag-before', 'drag-after', 'drag-swap')); });
   el.addEventListener('dragover', e => {
     if (![...e.dataTransfer.types].includes('text/x-lab64-panel')) return;
     e.preventDefault(); e.stopPropagation(); $('drop').classList.remove('over');
-    const r = el.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2;
-    el.classList.toggle('drag-after', after); el.classList.toggle('drag-before', !after);
+    const r = el.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, before = x < 0.25, after = x > 0.75;
+    el.classList.toggle('drag-after', after); el.classList.toggle('drag-before', before); el.classList.toggle('drag-swap', !before && !after);
   });
-  el.addEventListener('dragleave', () => el.classList.remove('drag-before', 'drag-after'));
+  el.addEventListener('dragleave', () => el.classList.remove('drag-before', 'drag-after', 'drag-swap'));
   el.addEventListener('drop', e => {
     const from = e.dataTransfer.getData('text/x-lab64-panel'); if (!from) return;
     e.preventDefault(); e.stopPropagation();
-    const after = el.classList.contains('drag-after'); el.classList.remove('drag-before', 'drag-after');
+    const after = el.classList.contains('drag-after'), swap = el.classList.contains('drag-swap');
+    el.classList.remove('drag-before', 'drag-after', 'drag-swap');
     if (from === id) return;
-    LAY.order.splice(LAY.order.indexOf(from), 1); LAY.order.splice(LAY.order.indexOf(id) + (after ? 1 : 0), 0, from); applyLayout();
+    if (swap) { const i = LAY.order.indexOf(from), j = LAY.order.indexOf(id); LAY.order[i] = id; LAY.order[j] = from; }
+    else { LAY.order.splice(LAY.order.indexOf(from), 1); LAY.order.splice(LAY.order.indexOf(id) + (after ? 1 : 0), 0, from); }
+    applyLayout();
   });
   // resize: drag the corner, the panel snaps to the nearest allowed width and height
   const rz = el.querySelector('.rz'); if (!rz) return;
@@ -906,7 +921,8 @@ document.querySelectorAll('.p').forEach(el => {             // header controls a
       if (w !== LAY.size[id][0] || h !== LAY.size[id][1]) setSize(id, [w, h]);
       const lab = $('rzlab'); lab.style.display = 'block'; lab.style.left = ev.clientX + 14 + 'px'; lab.style.top = ev.clientY + 14 + 'px'; lab.textContent = w + ' × ' + h;
     };
-    const up = () => { rz.removeEventListener('pointermove', move); rz.removeEventListener('pointerup', up); $('rzlab').style.display = 'none'; };
+    const up = () => { rz.removeEventListener('pointermove', move); rz.removeEventListener('pointerup', up); $('rzlab').style.display = 'none';
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };                 // (1.13) the resized panel stays in view
     rz.addEventListener('pointermove', move); rz.addEventListener('pointerup', up);
   });
 });

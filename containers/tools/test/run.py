@@ -54,7 +54,7 @@ def load(suite):
 
 
 def lock():
-    """one test run at a time: VICE's remote monitor port (6510) is shared, two runs would talk to each other's VICE"""
+    """one test run at a time: the runs share out/tmp, the reports and the live status (1.13: no longer the monitor port, one per VICE)"""
     import fcntl
     os.makedirs(os.path.join(PROJ, "out", "tmp"), exist_ok=True)
     f = open(os.path.join(PROJ, "out", "tmp", ".test.lock"), "w")

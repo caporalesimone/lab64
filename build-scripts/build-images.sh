@@ -12,6 +12,9 @@
 #   deleted; --force downloads them again (same content: the BuildKit cache stays valid and nothing is recompiled).
 # vc64web: pages generated in lab64-tools (into Lab64's own out/cache/vc64web, deleted once the image exists), image from the Dockerfile
 #   of the self-contained package containers/vc64web; the image holds the headless page and the portable one (the viewer offers it).
+# (1.13, TODO L24) one image build at a time per Lab64 folder (lock downloads.lock: two lab64 commands that find an image missing
+#   wait for each other instead of writing the same downloads/); the sources of an image are downloaded in parallel; the compile
+#   stages that BuildKit runs at the same time share the CPUs: make -j JOBS each (LAB64_BUILD_JOBS, default nproc / 3, at least 1).
 # C64_CA_BUNDLE=FILE: CA of a TLS-intercepting proxy, passed as a secret to the builds that download with npm (vc64web, viewer).
 set -eu
 TC=$(cd "$(dirname "$0")/.." && pwd)
@@ -23,8 +26,30 @@ BUILD_LOG="${TMPDIR:-/tmp}/lab64-images.log"
 build_failed() { echo "image build failed; last lines of $BUILD_LOG:" >&2; tail -n 80 "$BUILD_LOG" >&2; exit 1; }
 FORCE=0; [ "${1:-}" = "--force" ] && { FORCE=1; shift; }
 NAMES="${*:-tools viewer vc64web pdf-gen}"
-SECRET=""; [ -n "${C64_CA_BUNDLE:-}" ] && SECRET="--secret id=ca,src=$C64_CA_BUNDLE"
+# the lock: a folder (mkdir is atomic in POSIX sh) holding the PID of the owner; a lock left by a dead process is taken over.
+# The nested call of vc64web_pages ("$0" tools) runs under the lock of its parent (LAB64_IMAGES_LOCKED).
+LOCK="$TC/downloads.lock"
 have() { docker image inspect "lab64-$1:$VER" >/dev/null 2>&1; }
+if [ $FORCE = 0 ]; then                # nothing to build: no lock, no wait (the other commands call this to make sure an image exists)
+    M=""; for n in $NAMES; do have "$n" || M="$M $n"; done
+    [ -n "$M" ] || exit 0
+fi
+if [ -z "${LAB64_IMAGES_LOCKED:-}" ]; then
+    n=0
+    until mkdir "$LOCK" 2>/dev/null; do
+        o=$(cat "$LOCK/pid" 2>/dev/null || true)
+        if [ -n "$o" ] && ! kill -0 "$o" 2>/dev/null; then rm -rf "$LOCK"; continue; fi
+        [ $n = 0 ] && echo "another image build is running (PID ${o:-?}): waiting for it"
+        n=1; sleep 2
+    done
+    echo $$ > "$LOCK/pid"
+    trap 'rm -rf "$LOCK"' EXIT
+    trap 'exit 130' INT TERM HUP
+    export LAB64_IMAGES_LOCKED=1
+fi
+NPROC=$(nproc 2>/dev/null || echo 2)
+JOBS=${LAB64_BUILD_JOBS:-$(( NPROC / 3 ))}; [ "$JOBS" -ge 1 ] || JOBS=1
+SECRET=""; [ -n "${C64_CA_BUNDLE:-}" ] && SECRET="--secret id=ca,src=$C64_CA_BUNDLE"
 vc64web_pages() {                      # vc64web pages in Lab64's out/cache/vc64web/ (Lab64 itself is the project of this step)
     have tools || "$0" tools
     # the ROMs: the copy inside the lab64-tools image (made from roms/ when that image was built)
@@ -56,17 +81,23 @@ fetch() {
         echo "   $2: commit $R"
     fi
 }
+fetch_all() {                          # fetch_all NAME FILE [NAME FILE ...]: the downloads in parallel, one failure stops the build
+    P=""
+    while [ $# -ge 2 ]; do fetch "$1" "$2" & P="$P $!"; shift 2; done
+    F=0; for p in $P; do wait "$p" || F=1; done
+    [ $F = 0 ] || { echo "a download failed (see above)" >&2; exit 1; }
+}
 target() {                             # docker build of a target of the Lab64 Dockerfile, with the downloaded sources
     mkdir -p "$DL"
     case $1 in
-    viewer) fetch KASMVNC "kasmvnc-$KASMVNC_VERSION.deb"; fetch JSSID "jssid-$JSSID_VERSION.tar.gz" ;;
-    tools)  fetch VICE "vice-$VICE_VERSION.tar.gz"; fetch TASS64 "64tass-$TASS64_VERSION-src.zip"
-            fetch CC65 "cc65-$CC65_VERSION.tar.gz"; fetch CC1541 "cc1541-$CC1541_VERSION.tar.gz"; fetch ZX0 "zx0-$ZX0_VERSION.tar.gz"
-            fetch LIBRESIDFP "libresidfp-$LIBRESIDFP_VERSION.tar.gz"; fetch LIBSIDPLAYFP "libsidplayfp-$LIBSIDPLAYFP_VERSION.tar.gz"
-            fetch SIDPLAYFP "sidplayfp-$SIDPLAYFP_VERSION.tar.gz" ;;
+    viewer) fetch_all KASMVNC "kasmvnc-$KASMVNC_VERSION.deb" JSSID "jssid-$JSSID_VERSION.tar.gz" ;;
+    tools)  fetch_all VICE "vice-$VICE_VERSION.tar.gz" TASS64 "64tass-$TASS64_VERSION-src.zip" \
+                CC65 "cc65-$CC65_VERSION.tar.gz" CC1541 "cc1541-$CC1541_VERSION.tar.gz" ZX0 "zx0-$ZX0_VERSION.tar.gz" \
+                LIBRESIDFP "libresidfp-$LIBRESIDFP_VERSION.tar.gz" LIBSIDPLAYFP "libsidplayfp-$LIBSIDPLAYFP_VERSION.tar.gz" \
+                SIDPLAYFP "sidplayfp-$SIDPLAYFP_VERSION.tar.gz" ;;
     esac
     # shellcheck disable=SC2086
-    DOCKER_BUILDKIT=1 docker build --progress=plain $SECRET --target "$1" -t "$2:$VER" -t "$2:latest" \
+    DOCKER_BUILDKIT=1 docker build --progress=plain $SECRET --target "$1" -t "$2:$VER" -t "$2:latest" --build-arg JOBS="$JOBS" \
         --build-arg VICE_VERSION="$VICE_VERSION" --build-arg TASS64_VERSION="$TASS64_VERSION" --build-arg CC65_VERSION="$CC65_VERSION" \
         --build-arg CC1541_VERSION="$CC1541_VERSION" --build-arg ZX0_VERSION="$ZX0_VERSION" --build-arg KASMVNC_VERSION="$KASMVNC_VERSION" \
         --build-arg LIBRESIDFP_VERSION="$LIBRESIDFP_VERSION" --build-arg LIBSIDPLAYFP_VERSION="$LIBSIDPLAYFP_VERSION" --build-arg SIDPLAYFP_VERSION="$SIDPLAYFP_VERSION" \

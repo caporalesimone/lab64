@@ -91,6 +91,11 @@ borders); give VICE the size at start (`-windowwidth` / `-windowheight`, the pro
 The **▶ vc64web** button of a version, or **Empty vc64web**: the emulator in the browser with the disk of that version already
 loaded and started, with its on-screen keyboard, joystick and fire button, and the track bar of the drive.
 
+(1.13) On a computer (mouse) **FIRE** sits next to the stick, on the right; on a phone (touch) they stay on opposite sides, one per
+thumb. RUN/STOP, RETURN and SPACE stay above the track bar of the drive. The stick, FIRE, those three buttons and the keyboard can be
+**moved**: drag them with the right mouse button (at any time), or turn on **✥** in the top bar and drag them with any pointer;
+the places are remembered in the browser, a double click on **✥** puts them back (landscape layout only).
+
 ![vc64web](screenshots/11-vc64web.png)
 
 Its menu has the disk and program loading, quick commands (`LOAD "$"`, `LIST`, `LOAD "*",8,1`, `RUN`), autoload, emulator control,
@@ -102,7 +107,9 @@ joystick and keyboard, memory (POKE / PEEK) and the ROMs and drive.
 
 `sid.html`, **♪ play** on a `.sid` file of a version, or the **♪ SID Studio** button: library, transport with subtunes,
 VU meter, spectrum, one panel per voice (scope, envelope, waveform, note, ADSR, routing), master strip, piano roll, automation lanes, SID
-filter override, register table, jsSID live or reSID rendered audio, WAV recording and export. The desk can be rearranged; see
+filter override, register table, jsSID live or reSID rendered audio, WAV recording and export. The desk can be rearranged (1.13: drag a
+panel by its grip **⠿** or its title; dropped in the middle of another panel the two **swap places**, near its left or right edge it goes
+before or after it; resizing a panel keeps the page where it is); see
 [manifest.md](manifest.md) for the whole description.
 
 How SID Studio plays:

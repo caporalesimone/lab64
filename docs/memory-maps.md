@@ -30,6 +30,9 @@ sprites_src_end
 ;@map $2000..$2400 "sprite shapes (copied by init)"
 ```
 `free-after=start` = the area is needed only until then: the page adds "free after start-up" (metric `ram_free_after_start_<program>`).
+(1.13) When the value is a label of the module its address is shown next to it; `free-after=@LABEL` **requires** a label (a missing one
+is a warning, an error with `--strict`); any other value stays free text. In the overview by pages the annotated areas are drawn
+**striped** in their module's colour, and the tooltip names them.
 
 ## 2. Where new code and data can go: `;@free`
 
@@ -84,6 +87,15 @@ h_name  .fill 12         ; name, screen codes
 hero_end
         .endv
 ```
+
+### Scenarios measured in VICE, with no list (1.13)
+
+With probe dumps (`C64_MEMPROBE=1 lab64 test ...`, see below) the page also has **Scenarios measured in VICE**: in every dump Lab64 looks
+for the bytes of every module and of every disk file with a load address; at least 60% of them found = that item is in memory. The dumps
+that hold the same items make one scenario (`vice-1` = the one seen most often, then `vice-2`, ...), with the same table (free space,
+largest block, conflicts) and the same strip as a declared one, plus the number of sessions (hover it for their names). Nothing has to
+be declared, and declared scenarios stay as they are. Limits: a compressed file unpacked elsewhere is recognised only through the
+module that holds it; only what the tests run is seen. `memmap.json`: `scenarios_measured`.
 
 ## 5. Pages 0-3, `$0000-$03FF`
 

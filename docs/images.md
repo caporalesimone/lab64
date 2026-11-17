@@ -6,7 +6,7 @@ How the Lab64 images are built and what each one contains. The external programs
 [external-programs.md](external-programs.md); the host and container layout is in [architecture.md](architecture.md).
 
 One multi-stage Dockerfile, `docker/Dockerfile`: one image per target, all with the same parent. Tags: `lab64-<name>:<VERSION>`
-(file `VERSION`, today 1.12) and `lab64-<name>:latest`. A project can require a version: `LAB64_VERSION` in its `lab64.env`
+(file `VERSION`, today 1.13) and `lab64-<name>:latest`. A project can require a version: `LAB64_VERSION` in its `lab64.env`
 (the scripts stop if it differs).
 
 | Image | Target | Contents | Runs |
@@ -27,3 +27,20 @@ the KasmVNC package must match the Ubuntu release).
 
 **Images and registries** (owner's rule, 16/11): the images contain the Commodore ROMs and third-party programs, so they are never
 published in a public registry; at most pushed to a private registry at home.
+
+## Building: lock, downloads, CPUs, pinned dependencies (1.13)
+
+- **One build at a time** per Lab64 folder: `build-images.sh` holds the lock `downloads.lock/` (with the PID of its owner; a lock left by a
+  dead process is taken over). A second `lab64` command that finds an image missing prints "waiting for it" and goes on after.
+- The sources of an image are **downloaded in parallel** (each checked with its SHA-256 or commit, as before).
+- BuildKit compiles the independent stages (VICE, sidplayfp, 64tass, cc65, ...) **at the same time**: each `make` gets `-j JOBS`, with
+  `JOBS = nproc / 3` (at least 1), so together they use about the CPUs of the machine. `LAB64_BUILD_JOBS=N` overrides it (changing it
+  recompiles those stages once). cc65 is always serial (its makefiles race).
+- **Pinned dependencies**: the Python packages of the venvs with `pip install -c docker/constraints-tools.txt` / `constraints-pdf.txt`
+  (all versions, dependencies included); the viewer's npm packages with `npm ci` from `containers/viewer/package-lock.json`. The
+  top-level versions stay in `build-scripts/sources.conf`, which points to these files. To update one: change `sources.conf`, rebuild,
+  write the new versions of the venv into the constraints file (`python -c "import importlib.metadata as m; ..."` on the venv's
+  `site-packages`) or `npm install --package-lock-only` for the lock.
+- **VICE data** in `lab64-tools` (`/opt/vice/share/vice`, ~0.6 MB instead of ~9 MB): `C64/` and `DRIVES/` without ROMs (palettes,
+  keymaps, symbols, default resources), `GLSL/` (the GTK3 OpenGL output), `hotkeys/`, `common/` (fonts and the x64 icons). The other
+  machines are not copied. Every ROM comes from Lab64's `roms/` (`/opt/roms`), passed on the command line.

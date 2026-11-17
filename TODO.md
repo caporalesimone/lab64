@@ -6,13 +6,7 @@ Open work only. A finished item is deleted (its decision goes into the docs). It
 inside a category, ordered by size. **Sizes**: **XS** = minutes or a decision; **S** = hours; **M** = 1–2 days; **L** = several
 days; **XL** = weeks. IDs are stable: `L<n>` (Lab64).
 
-## 1 — Publishing (before the repository goes public)
-
-### L3 Images on a registry, repository on GitHub — S
-- `build-images.sh` stays (local builds); add `lab64 images --pull` from a registry (tags `:<VERSION>`), CI that builds and pushes.
-  Release assets of a project on GitHub (the content of `out/releases/v<V>/`): a `lab64 publish --github` step, to design.
-
-## 2 — Command line and project contract
+## 1 — Command line and project contract
 
 ### L22 Stack up during a version change — XS (decision) + S
 - After `lab64 upgrade` (new `VERSION`) the commands still enter the running `lab64-tools` container of the OLD version until
@@ -28,7 +22,7 @@ days; **XL** = weeks. IDs are stable: `L<n>` (Lab64).
 - The stack has fixed names (`lab64-tools`, `lab64-viewer`, ...): one project at a time, `lab64 up` for another asks to stop the
   first. For several: a compose project name and a viewer port per project.
 
-## 3 — Manual (`lab64 manual`)
+## 2 — Manual (`lab64 manual`)
 
 ### L8 More base themes — S each
 - Done: `c64`, `plain`. Candidates when wanted: `c128` (grey and blue), `breadbin` (brown and beige).
@@ -37,59 +31,22 @@ days; **XL** = weeks. IDs are stable: `L<n>` (Lab64).
 - The format changes only the sheet; the type sizes are those of the theme (8 pt, made for A5). A `--size` per format in the
   base themes (e.g. A4 = 10 pt) would give a sensible default for bigger sheets. Texts still have to be written per format.
 
-## 4 — Memory map (`lab64 map`)
+## 3 — Tests and VICE
 
-### L11 (ex game T1) Scenarios from the run-time probe — S-M
-- Done: scenarios listed by the project (`;@scenario`, `C64_MAP_SCENARIOS`) with free space and conflicts; label pairs.
-  Missing: deriving the scenarios from the probe dumps (which modules were in memory in each VICE session), so no list is needed.
+### L36 (with ex L13, ex game J10) Parallel `lab64 test` by number of CPUs — M
+- Today one run at a time (`out/tmp/.test.lock`): the VICE monitor port (6510, fixed in `containers/tools/py/vicemon.py`) is unique, and two runs
+  talked over each other (random failures seen during the project restructuring).
+- To do: monitor port per worker (6510+N, passed to `vicemon.py` and to VICE `-remotemonitoraddress`); working folder per worker
+  (`out/tmp`, the `.d64` written by the save tests, Krill caches); lock per worker plus a scheduler that hands out the tests from
+  the list; workers = number of CPUs (`nproc`), overridable (`lab64 test --jobs N`, `C64_TEST_JOBS`); one merged report and the
+  same time caps (`C64_TEST_CAPS`).
+- Open points (not measured): CPU use of one VICE instance (if it saturates a core, 2 workers on 2 CPUs give less than 2x); tests
+  that measure cycles (frame pacing, PERF, music IRQ) may become unstable on a shared CPU, so they may need to run alone.
+  Smoke + sanity (~21 s, mostly VICE start-up) is probably not worth parallelizing; the regression (~6-7 min) is.
+- Also (ex L13): one Xvfb per worker, tests that assemble variants isolated (a project may rewrite its own build); in the viewer
+  more screens (`VIEW_SCREENS=N`, one Xvnc per screen; ~30 lines and 30-60 MB of RAM per screen, not measured).
 
-### L19 Annotations: more — S
-- `;@map` inside macros or generated sources is read only if the generated file is among the sources of the listing (it is).
-  Not done: areas in the page map coloured by annotation; `free-after` values other than free text (e.g. checked against labels).
-
-## 5 — Tests and VICE
-
-### L29 `c64test.test(slow=...)` — XS (question for the owner)
-- The flag is stored in the registry (`slow`, also set by `script()`) but the Lab64 engine never reads it. Kept because a project
-  may read it (Lab64 cannot see the projects). Owner: does any project use it? If not, remove it (and document the removal).
-
-### L30 `vicemon.labels()` / `listing()` default to `"game"` — XS (question for the owner)
-- A leftover of the first project: the default build of a new project writes `out/work/main.lbl` / `main.lst`, so the skeleton
-  passes the name (`labels("main")`). Changing the default would break a project that calls them without argument. Owner: switch
-  the default to `"main"` (a version bump, in the migration notes) or keep `"game"`?
-
-### L21 One container for every command: monitor port and orphans — S-M
-- With the stack up all the tools commands run in the same `lab64-tools` container (`docker exec`), so they share VICE's remote
-  monitor port 6510: two commands that start VICE at the same time (a test run and a `lab64 run` of a project tool) talk to each
-  other's VICE. The test lock covers only test runs. And an interrupted `docker exec` without a TTY leaves its process running in
-  the container (no signal is forwarded): an orphan VICE that keeps 6510. With `docker run --rm --init` neither happens, so the
-  "same results" of docs/command-line.md holds only for one command at a time.
-- Proposal: a monitor port per process (free port chosen by `vicemon.Vice`, passed to x64sc with `-remotemonitoraddress`) or a
-  lock in `vicemon.Vice`; cleanup of orphan VICE processes when a command starts (or `docker exec` wrapped so that it forwards
-  signals / kills its process group on exit).
-
-### L13 (ex game J10) Parallel tests — M
-- More workers: one Xvfb per worker, different remote monitor ports, temporary files in `out/tmp/<worker>`, tests that assemble
-  variants isolated (a project may rewrite its own build), one report. In the viewer: more screens (`VIEW_SCREENS=N`, one Xvnc
-  per screen; estimate ~30 lines and 30–60 MB of RAM per screen, not measured). Duration caps stay.
-
-## 6 — Images
-
-### L24 Concurrent image builds and downloads — S
-- Two `lab64` commands that find an image missing both run `build-images.sh`, which write the same `downloads/` files (`.part`
-  then rename) and both delete `downloads/` at the end. Needs a lock (e.g. `flock` on `downloads/.lock`, or `mkdir` as a lock in
-  POSIX sh) around fetch + build.
-
-### L25 Dependencies not pinned — S
-- Against "versions only in `sources.conf`": pip installs only the top-level packages with a version (Matplotlib, NumPy,
-  WeasyPrint); their dependencies (pyparsing, fonttools, cffi, tinycss2, ...) float. The viewer's npm install has no lock file
-  (`package.json` ranges; the lock is deleted after the install). Proposal: constraints files / a `package-lock.json` generated once
-  and kept in the repository, with their versions listed in `sources.conf` (or referenced from it).
-
-### L26 VICE data: copy only what is needed — S
-- `/opt/vice/share` is copied whole into `lab64-tools`: ROMs of all the machines and fonts.
-  Decision (15/11): copy only `C64/`, `DRIVES/` and what x64sc / c1541 really load (keymaps, palettes, GTK3 UI data); check
-  that VICE starts and the tests pass, compare the image size.
+## 4 — Images
 
 ### L14 (ex game I10) Smaller images: what is left — M
 - Done on 15/11: tools 1553 -> 1283 MB (Matplotlib and NumPy from pip), vc64web 2116 -> 1508 MB (headless shell only), dpkg rule
@@ -100,12 +57,7 @@ days; **XL** = weeks. IDs are stable: `L<n>` (Lab64).
   again (KasmVNC's Xvnc), PulseAudio pulls GStreamer codecs (~55 MB). `lab64-vc64web`: Chromium's system libraries (~470 MB in
   `/usr/lib`).
 
-### L15 (ex game I9) Windows through WSL2 — S
-- Never tried: `lab64 check-env`, a project build, `lab64 up` and `lab64 view` on WSL2 + Docker Desktop (WSL detection tested only
-  with a sample `mountinfo`; X11 and Unix sockets in the `lab64-x11` volume on Windows not verified; the gain of the always-on
-  tools container there not measured).
-
-## 7 — Viewer
+## 5 — Viewer
 
 ### L27 Viewer server: Range requests, player socket permissions — S
 - `server.js` ignores `Range`: big files (videos, disks) cannot be resumed or seeked; answer `206` with `Content-Range` for one
@@ -134,17 +86,6 @@ days; **XL** = weeks. IDs are stable: `L<n>` (Lab64).
 - `lab64 publish` renders the MP3s one after the other (about 12x real time on a 2-core machine): rendering in parallel needs a
   second core per render and a bound on the cache (1 GiB).
 - Reproducibility is checked on one machine; reSIDfp's SIMD code (`--with-simd=runtime`) may differ in the last bits between CPUs.
-
-### L36 Parallel `lab64 test` (regression) by number of CPUs — M
-- Today one run at a time (`out/tmp/.test.lock`): the VICE monitor port (6510, fixed in `containers/tools/py/vicemon.py`) is unique, and two runs
-  talked over each other (random failures seen during the project restructuring).
-- To do: monitor port per worker (6510+N, passed to `vicemon.py` and to VICE `-remotemonitoraddress`); working folder per worker
-  (`out/tmp`, the `.d64` written by the save tests, Krill caches); lock per worker plus a scheduler that hands out the tests from
-  the list; workers = number of CPUs (`nproc`), overridable (`lab64 test --jobs N`, `C64_TEST_JOBS`); one merged report and the
-  same time caps (`C64_TEST_CAPS`).
-- Open points (not measured): CPU use of one VICE instance (if it saturates a core, 2 workers on 2 CPUs give less than 2x); tests
-  that measure cycles (frame pacing, PERF, music IRQ) may become unstable on a shared CPU, so they may need to run alone.
-  Smoke + sanity (~21 s, mostly VICE start-up) is probably not worth parallelizing; the regression (~6-7 min) is.
 
 ### L16 (ex game J13) Overlay (C64 keyboard, Joy 1, Joy 2): real devices — S-M
 - Tried only in a headless browser. To do: real touch screen (multi-touch stick + fire, rotation, key size), real browser and

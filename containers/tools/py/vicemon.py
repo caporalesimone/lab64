@@ -1,6 +1,6 @@
 """VICE remote monitor library of Lab64 (10/11). Copyright (c) 2026 - Simone Caporale
 
-x64sc with the remote monitor (port 6510), started with factory settings and ALL the ROMs of Lab64 roms/ (no user
+x64sc with the remote monitor (1.13: a free port per VICE, Vice().port; free_port() for project tools), started with factory settings and ALL the ROMs of Lab64 roms/ (no user
 configuration, nothing from VICE's data folder): a fast client (no fixed delays: it waits for the prompt or the stop),
 program labels and listings of the 64tass build (out/work/<name>.lbl / .lst), memory access, routine calls, screenshots,
 and the run-time memory probe (C64_MEMPROBE=1, or 2 for the second pass with another pattern; containers/tools/memmap/probe.py).
@@ -82,15 +82,15 @@ FRAME = 19656                                     # cycles of a PAL frame
 PROBE_DIR = os.path.join(OUT, "memprobe")         # C64_MEMPROBE=1: RAM dumps of every VICE session (set by the project build or by hand)
 
 
-def labels(name="game"):
-    """labels and constants of out/work/<name>.lbl ($hex and decimal)"""
+def labels(name="main"):
+    """labels and constants of out/work/<name>.lbl ($hex and decimal); (1.13) default "main", the file of the default build"""
     t = open(os.path.join(OUT, name + ".lbl")).read()
     d = {m.group(1): int(m.group(2), 16) for m in re.finditer(r"^(\w+)\s*=\s*\$([0-9a-f]+)", t, re.M)}
     d.update({m.group(1): int(m.group(2)) for m in re.finditer(r"^(\w+)\s*=\s*(\d+)\s*$", t, re.M)})
     return d
 
 
-def listing(name="game"):
+def listing(name="main"):
     return open(os.path.join(OUT, name + ".lst")).read()
 
 
@@ -156,6 +156,15 @@ def settle(s, boot=1.0, gap=0.1):
     return buf
 
 
+def free_port():
+    """(1.13, TODO L21) a free TCP port on 127.0.0.1 for one VICE remote monitor: the commands of a project share the lab64-tools
+    container (lab64 up), so a fixed port (6510) let two VICE sessions answer each other. Pass it to x64sc with
+    -remotemonitor -remotemonitoraddress ip4://127.0.0.1:<port> (vice_env.sh: VMON, VMON_PORT)."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 class Vice:
     """x64sc in warp with the remote monitor. disk: d64 mounted in drive 8 (a copy, so the original is untouched)."""
     _probe_n = 0
@@ -177,13 +186,14 @@ class Vice:
             self.disk = os.path.join(OUT, "test_%d.d64" % os.getpid())
             shutil.copy(disk, self.disk)
             args += ["-8", self.disk]
-        args += list(extra) + ["-remotemonitor"]
+        self.port = free_port()
+        args += list(extra) + ["-remotemonitor", "-remotemonitoraddress", "ip4://127.0.0.1:%d" % self.port]
         self.p = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)   # own group: close() kills xvfb-run AND x64sc
         self.s = None
         t0 = time.time()
         while time.time() - t0 < 20:
             try:
-                self.s = socket.create_connection(("127.0.0.1", 6510)); break
+                self.s = socket.create_connection(("127.0.0.1", self.port)); break
             except OSError:
                 time.sleep(0.05)
         try:
@@ -219,7 +229,7 @@ class Vice:
                 self.probe_session, self.probe_seq = "%d_%d" % (os.getpid(), Vice._probe_sessions), 0   # (1.6) dumps of one session
                 self.probing, self.probe_disk = True, memprobe.file_sha1(disk)
         except Exception:
-            self.close()                                # no VICE left running (it would hold port 6510 for the next Vice())
+            self.close()                                # no VICE left running
             raise
 
     # ---- protocol

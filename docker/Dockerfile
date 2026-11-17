@@ -42,21 +42,29 @@ WORKDIR /src
 # for it (/opt/vice/share/vice), so no copies next to the executable.
 FROM tools-builder AS vice-build
 ARG VICE_VERSION
+ARG JOBS
 COPY --from=downloads vice-${VICE_VERSION}.tar.gz /src/
 RUN tar xzf vice-${VICE_VERSION}.tar.gz && cd vice-${VICE_VERSION} \
     && ./configure --prefix=/opt/vice --enable-gtk3ui --disable-pdf-docs --without-oss > /src/configure.log 2>&1 \
-    && make -j"$(nproc)" > /src/make.log 2>&1 && make install > /src/install.log 2>&1 \
+    && make -j"${JOBS:-$(nproc)}" > /src/make.log 2>&1 && make install > /src/install.log 2>&1 \
     || { tail -30 /src/*.log; exit 1; }
-# only what is needed goes into the image: x64sc (C64), c1541 (disks) and the data (~9 MB). A failed copy stops the build; only
-# "x64sc --version" may fail (its output is informative). Separate layer: changing it never recompiles VICE.
-RUN mkdir -p /out/bin /out/licenses && cp /opt/vice/bin/x64sc /opt/vice/bin/c1541 /out/bin/ && cp -a /opt/vice/share /out/share \
+# only what is needed goes into the image: x64sc (C64), c1541 (disks) and the data x64sc reads (1.13, TODO L26: ~0.6 MB instead of
+# ~9 MB): C64/ without ROMs (palettes, keymaps, symbols, resources), DRIVES/ without ROMs, GLSL/ (GTK3 OpenGL output), hotkeys/,
+# common/ without the icons of the other machines and the PET fonts. The other machines are dropped; every ROM comes from Lab64
+# roms/ (/opt/roms, passed on the command line). A failed copy stops the build; only "x64sc --version" may fail (informative).
+# Separate layer: changing it never recompiles VICE.
+RUN mkdir -p /out/bin /out/licenses /out/share/vice && cp /opt/vice/bin/x64sc /opt/vice/bin/c1541 /out/bin/ \
+    && cd /opt/vice/share/vice && cp -a C64 DRIVES GLSL common hotkeys /out/share/vice/ && cd /src \
+    && rm -f /out/share/vice/C64/*.bin /out/share/vice/DRIVES/*.bin /out/share/vice/common/PetMe*.ttf \
+    && find /out/share/vice/common -name 'vice-*' ! -name 'vice-x64_*' ! -name 'vice-logo*' -delete \
     && cp vice-${VICE_VERSION}/COPYING /out/licenses/vice \
     && { /out/bin/x64sc --version > /out/VERSION.txt 2>&1 || true; }
 
 FROM tools-builder AS tass64-build
 ARG TASS64_VERSION
+ARG JOBS
 COPY --from=downloads 64tass-${TASS64_VERSION}-src.zip /src/
-RUN unzip -q 64tass-${TASS64_VERSION}-src.zip && make -s -C 64tass-${TASS64_VERSION}-src -j"$(nproc)" >/dev/null \
+RUN unzip -q 64tass-${TASS64_VERSION}-src.zip && make -s -C 64tass-${TASS64_VERSION}-src -j"${JOBS:-$(nproc)}" >/dev/null \
     && mkdir -p /out/bin /out/licenses && cp 64tass-${TASS64_VERSION}-src/64tass /out/bin/ \
     && cp 64tass-${TASS64_VERSION}-src/LICENSE-GPL-2.0 /out/licenses/64tass
 
@@ -93,6 +101,7 @@ FROM tools-builder AS sidplayfp-build
 ARG LIBRESIDFP_VERSION
 ARG LIBSIDPLAYFP_VERSION
 ARG SIDPLAYFP_VERSION
+ARG JOBS
 COPY --from=downloads libresidfp-${LIBRESIDFP_VERSION}.tar.gz libsidplayfp-${LIBSIDPLAYFP_VERSION}.tar.gz sidplayfp-${SIDPLAYFP_VERSION}.tar.gz /src/
 ENV PKG_CONFIG_PATH=/opt/sidplayfp/lib/pkgconfig PKG_CONFIG="pkg-config --static"
 # libresidfp: --with-simd=runtime picks the SSE / AVX code of the resampler when the CPU has it (about 3x faster than none); the
@@ -100,13 +109,13 @@ ENV PKG_CONFIG_PATH=/opt/sidplayfp/lib/pkgconfig PKG_CONFIG="pkg-config --static
 RUN for p in libresidfp-${LIBRESIDFP_VERSION} libsidplayfp-${LIBSIDPLAYFP_VERSION}; do \
         tar xzf $p.tar.gz && cd $p \
         && ./configure --prefix=/opt/sidplayfp --enable-static --disable-shared --disable-dependency-tracking $([ "${p#libresidfp}" != "$p" ] && echo --with-simd=runtime) CXXFLAGS="-O2" > /src/$p.configure.log 2>&1 \
-        && make -j"$(nproc)" > /src/$p.make.log 2>&1 && make install > /src/$p.install.log 2>&1 \
+        && make -j"${JOBS:-$(nproc)}" > /src/$p.make.log 2>&1 && make install > /src/$p.install.log 2>&1 \
         || { tail -30 /src/*.log; exit 1; }; \
         cd /src; \
     done
 RUN tar xzf sidplayfp-${SIDPLAYFP_VERSION}.tar.gz && cd sidplayfp-${SIDPLAYFP_VERSION} \
     && ./configure --prefix=/opt/sidplayfp --disable-dependency-tracking CXXFLAGS="-O2" LDFLAGS="-static-libstdc++ -static-libgcc" > /src/sidplayfp.configure.log 2>&1 \
-    && make -j"$(nproc)" > /src/sidplayfp.make.log 2>&1 \
+    && make -j"${JOBS:-$(nproc)}" > /src/sidplayfp.make.log 2>&1 \
     || { tail -30 /src/sidplayfp*.log; exit 1; }
 RUN mkdir -p /out/bin /out/licenses && cp sidplayfp-${SIDPLAYFP_VERSION}/src/sidplayfp /out/bin/ && strip /out/bin/sidplayfp \
     && cp libresidfp-${LIBRESIDFP_VERSION}/COPYING /out/licenses/libresidfp && cp libsidplayfp-${LIBSIDPLAYFP_VERSION}/COPYING /out/licenses/libsidplayfp \
@@ -127,9 +136,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
     && rm -rf /var/lib/apt/lists/*
 ARG MATPLOTLIB_VERSION
 ARG NUMPY_VERSION
-RUN --mount=type=secret,id=ca if [ -s /run/secrets/ca ]; then export PIP_CERT=/run/secrets/ca; fi; \
+RUN --mount=type=secret,id=ca --mount=type=bind,source=constraints-tools.txt,target=/tmp/constraints.txt \
+    if [ -s /run/secrets/ca ]; then export PIP_CERT=/run/secrets/ca; fi; \
     python3 -m venv --system-site-packages /opt/py \
-    && /opt/py/bin/pip install --no-cache-dir -q matplotlib==${MATPLOTLIB_VERSION} numpy==${NUMPY_VERSION} \
+    && /opt/py/bin/pip install --no-cache-dir -q -c /tmp/constraints.txt matplotlib==${MATPLOTLIB_VERSION} numpy==${NUMPY_VERSION} \
     && /opt/py/bin/pip uninstall -y -q pip && find /opt/py -name __pycache__ -prune -exec rm -rf {} +
 
 # dpkg: no documentation, man pages or translations in the final images (the copyright files stay: licenses)
@@ -178,9 +188,10 @@ RUN ln -s /lab64/containers/common/lab64-worker /usr/local/bin/lab64
 FROM base AS viewer-node
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm build-essential python3 libpulse-dev \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=viewer-src package.json /opt/viewer/
+# (1.13, TODO L25) package-lock.json in the repository: npm ci installs exactly those versions (dependencies included)
+COPY --from=viewer-src package.json package-lock.json /opt/viewer/
 RUN --mount=type=secret,id=ca if [ -s /run/secrets/ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/ca; npm config set cafile /run/secrets/ca; fi; \
-    cd /opt/viewer && npm install --omit=dev --no-audit --no-fund && rm -f package-lock.json
+    cd /opt/viewer && npm ci --omit=dev --no-audit --no-fund
 # jsSID (SID player of sid.html): only the script and its README (license) from the downloaded source, plus the Lab64 hooks
 # (per-voice scope, mute, filter bypass: containers/viewer/jssid_patch.py) and its AudioWorklet build (jssid-worklet.js: the same patched
 # core + containers/viewer/jssid_worklet_tail.js, generated by the same script)
@@ -216,8 +227,9 @@ FROM base AS pdf-build
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv python3-yaml python3-pil \
     && rm -rf /var/lib/apt/lists/*
 ARG WEASYPRINT_VERSION
-RUN --mount=type=secret,id=ca if [ -s /run/secrets/ca ]; then export PIP_CERT=/run/secrets/ca; fi; \
-    python3 -m venv --system-site-packages /opt/pdf && /opt/pdf/bin/pip install --no-cache-dir -q weasyprint==${WEASYPRINT_VERSION} \
+RUN --mount=type=secret,id=ca --mount=type=bind,source=constraints-pdf.txt,target=/tmp/constraints.txt \
+    if [ -s /run/secrets/ca ]; then export PIP_CERT=/run/secrets/ca; fi; \
+    python3 -m venv --system-site-packages /opt/pdf && /opt/pdf/bin/pip install --no-cache-dir -q -c /tmp/constraints.txt weasyprint==${WEASYPRINT_VERSION} \
     && /opt/pdf/bin/pip uninstall -y -q pip && mkdir -p /opt/pdf/licenses \
     && cp /opt/pdf/lib/python3*/site-packages/weasyprint-*.dist-info/licenses/LICENSE /opt/pdf/licenses/weasyprint 2>/dev/null \
     || cp /opt/pdf/lib/python3*/site-packages/weasyprint-*.dist-info/LICENSE /opt/pdf/licenses/weasyprint

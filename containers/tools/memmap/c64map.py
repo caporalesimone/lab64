@@ -545,6 +545,16 @@ def annotations(used):
                 x = {"module": m.name, "file": src, "line": n, "from": a, "to": b, "text": text,
                      "free_after": fa.group(1) if fa else None, "name": st,
                      "scenarios": sc.group(1).split(",") if sc else None}
+                # (1.13, TODO L19) free-after=@LABEL: the area is free once the code reaches that label, which must exist; a plain
+                # value that is a label of the module is resolved too (its address is shown); any other value stays free text
+                if fa:
+                    v = fa.group(1)
+                    lab = v[1:] if v.startswith("@") else v
+                    if lab in m.labels:
+                        x["free_after"], x["free_after_addr"] = lab, m.labels[lab]
+                    elif v.startswith("@"):
+                        bad.append("%s:%d: @map %s: free-after=%s: label not found in %s.lbl" % (src, n, st, v, m.name))
+                        x["free_after"] = lab
                 if re.search(r"(^|\s)layout(\s|$)", rest):
                     lines = lines if lines is not None else label_lines(m)
                     x["fields"] = layout_fields(m, a, b, lines)
@@ -798,7 +808,7 @@ def annot_html(ann, col):
             w("<tr><td><code>$%04X-$%04X</code> %s</td><td>%d B</td><td><i style='background:%s' class='sw'></i>%s</td><td>%s%s</td><td>%s</td><td>%s</td>"
               "<td><code>%s:%d</code></td></tr>" % (a["from"], a["to"] - 1, E(a["name"]), a["to"] - a["from"], col.get(a["module"], "#888"),
                                                    E(a["module"]), E(a["text"]), (" <a href='#layout-%s'>fields</a>" % E(a["name"], True)) if "fields" in a else "",
-                                                   E(a["free_after"] or ""), E(", ".join(a["scenarios"] or [])) or "<span class='dim'>all</span>", E(a["file"]), a["line"]))
+                                                   E(a["free_after"] or "") + (" <code>$%04X</code>" % a["free_after_addr"] if "free_after_addr" in a else ""), E(", ".join(a["scenarios"] or [])) or "<span class='dim'>all</span>", E(a["file"]), a["line"]))
         w("</table></div>")
         for b in bad:
             w("<p class='note'><b>Not used:</b> %s</p>" % E(b))
@@ -841,6 +851,25 @@ def annot_html(ann, col):
           "Items = modules (listings) and disk files (wildcards: the files of one pattern are alternatives, one at a time). Free = "
           "$0400-$FFFF with only those in memory (and their annotated areas); a conflict = two items at the same addresses.</p>")
         for sc in scen:
+            w("<h3 id='scen-%s'>%s</h3>" % (E(sc["name"], True), E(sc["name"])))
+            w(strip_svg(sc["lanes"], sc["free_ranges"], col))
+        w("</section>")
+    meas = ann.get("measured") or []
+    if meas:                                           # (1.13, TODO L11)
+        w("<section><h2>Scenarios measured in VICE (run-time probe)</h2><table><tr><th>Scenario</th><th>Modules and files in RAM</th>"
+          "<th class='n'>Sessions</th><th>Free</th><th>Largest free block</th><th>Conflicts</th></tr>")
+        for sc in meas:
+            items = sc["modules"] + [f for v in sc["files"].values() for f in v]
+            cf = "; ".join("%s / %s" % (c["a"], c["b"]) for c in sc["conflicts"])
+            w("<tr><td><a href='#scen-%s'><b>%s</b></a></td><td>%s</td><td class='n' title='%s'>%d</td><td>%d B</td><td>%d B</td><td>%s</td></tr>" % (
+                E(sc["name"], True), E(sc["name"]), E(" ".join(items)), E("\n".join(sc["sessions"][:40]), True), len(sc["sessions"]),
+                sc["free_bytes"], sc["largest_free"], E(cf) if cf else "none"))
+        w("</table><p class='note'>No list needed: in every RAM dump of the probe (<code>C64_MEMPROBE=1 lab64 test ...</code>) Lab64 looks for "
+          "the bytes of every module and of every disk file with a load address (at least %d%% of them found = in memory); the dumps "
+          "with the same items make one scenario, <b>vice-1</b> the one seen most often (hover the number for the sessions). Free = "
+          "$0400-$FFFF with only those in memory. Files unpacked elsewhere (compressed) are recognised only through the module that holds "
+          "them. Declared scenarios (<code>;@scenario</code>) stay as they are.</p>" % round(MATCH * 100))
+        for sc in meas:
             w("<h3 id='scen-%s'>%s</h3>" % (E(sc["name"], True), E(sc["name"])))
             w(strip_svg(sc["lanes"], sc["free_ranges"], col))
         w("</section>")
@@ -1035,6 +1064,38 @@ def share(ram, sigs):
     return max([sum(1 for a, b in sg.items() if ram[a] == b) / float(len(sg)) for sg in sigs if sg] or [0.0])
 
 
+def item_signatures(used, disk):
+    """(1.13, TODO L11) {item: {address: byte}} of what can be recognised in a RAM dump: every module with bytes (its listing, at the
+    run addresses) and every disk file with a load address that is not the file of a module (at least 16 bytes)"""
+    sigs = {m.name: dict(m.val) for m in used if m.val}
+    mod_files = {f for m in used for f in (m.disk or [])}
+    for f in (disk or {}).get("files", []):
+        if "load" in f and f["name"] not in mod_files and f["name"] not in sigs:
+            sg = {f["load"] + i: b for i, b in enumerate(f["data"][2:]) if f["load"] + i < 0x10000}
+            if len(sg) >= 16:
+                sigs[f["name"]] = sg
+    return sigs
+
+
+def probe_scenarios(dumps, used, disk):
+    """(1.13, TODO L11) the scenarios measured in VICE, with no ;@scenario list: in every dump of the probe the items whose bytes are
+    there (at least MATCH of them); the dumps that hold the same items make one scenario ("vice-1" = the one seen most often).
+    -> ({name: [items]}, {name: [session tags]}). Disk files are written as exact names (wildcards escaped)."""
+    sigs = item_signatures(used, disk)
+    files = {f["name"] for f in (disk or {}).get("files", [])}
+    groups = {}
+    for d in dumps:
+        have = tuple(sorted(n for n, sg in sigs.items() if share(d["ram"], [sg]) >= MATCH))
+        if have:
+            groups.setdefault(have, []).append(d["tag"])
+    scen, tags = {}, {}
+    for i, (items, ts) in enumerate(sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))):
+        name = "vice-%d" % (i + 1)
+        scen[name] = [glob.escape(x) if x in files else x for x in items]
+        tags[name] = sorted(ts)
+    return scen, tags
+
+
 def assign_dumps(dumps, progs, used, disk):
     """dump -> program whose main file is in the RAM at the end of the session (best share of its bytes, at least MATCH).
     Returns ({program name: [dumps]}, [(dump, best name, best share)] not assigned)"""
@@ -1166,20 +1227,31 @@ def page_html(used, other, disk, occ, title, pr=None, ann=None, prog=None):
     w("<section><h2>Overview (256-byte pages)</h2><div class='legend'>")
     for m in used:
         w("<span><i style='background:%s'></i>%s</span>" % (col[m.name], E(m.name)))
+    amap = {}                                          # (1.13, TODO L19) annotated areas: striped in their module's colour
+    for ar in (ann or {}).get("areas", []):
+        for ad in range(ar["from"], ar["to"]):
+            amap.setdefault(ad & 0xFFFF, ar)
+    stripe = lambda c: "repeating-linear-gradient(135deg,%s 0 3px,#fffaf0 3px 5px)" % c
     w("<span><i style='background:%s'></i>data files</span><span><i style='background:%s'></i>only images, fillers, module files</span>"
-      "<span><i style='background:#4f9d4566'></i>free</span></div>" % (KCOL[DATA], KCOL[LOAD]))
+      "%s<span><i style='background:#4f9d4566'></i>free</span></div>" % (KCOL[DATA], KCOL[LOAD],
+      "<span><i style='background:%s'></i>annotated area (;@map), module colour</span>" % stripe("#555") if amap else ""))
     w("<div class='pages'><div></div>" + "".join("<div class='h'>%X</div>" % c for c in range(16)))
     for r in range(16):
         w("<div class='rh'>$%X000</div>" % r)
         for c in range(16):
             pg = r * 16 + c
-            share, free, data, trans = {}, 0, 0, 0
+            share, free, data, trans, acol = {}, 0, 0, 0, {}
             for a in range(pg * 256, pg * 256 + 256):
                 o = occ.get(a, {})
                 who = set()
                 for k in (CODE, RES, REF):
                     who |= o.get(k, set())
-                if who:
+                ar = amap.get(a)
+                if ar and not (o.get(CODE) or o.get(REF)):     # an area with no code of its own: shown as the area
+                    key = "\x00" + ar["name"]
+                    share[key] = share.get(key, 0) + 1
+                    acol[key] = (ar["module"], ar["name"])
+                elif who:
                     for x in who:
                         share[x] = share.get(x, 0) + 1.0 / len(who)
                 elif DATA in o:
@@ -1188,9 +1260,11 @@ def page_html(used, other, disk, occ, title, pr=None, ann=None, prog=None):
                     trans += 1
                 else:
                     free += 1
-            tip = "$%02X00-$%02XFF  %s" % (pg, pg, sys_name(pg * 256)) + "".join("\n%s: %d B" % (x, round(v)) for x, v in sorted(share.items(), key=lambda kv: -kv[1])) + \
+            nm = lambda x: ("area %s (%s)" % (acol[x][1], acol[x][0])) if x in acol else x
+            tip = "$%02X00-$%02XFF  %s" % (pg, pg, sys_name(pg * 256)) + "".join("\n%s: %d B" % (nm(x), round(v)) for x, v in sorted(share.items(), key=lambda kv: -kv[1])) + \
                   ("\ndata files: %d B" % data if data else "") + ("\nimages/fillers/module files: %d B" % trans if trans else "") + ("\nfree: %d B" % free if free else "")
-            bars = "".join("<i style='flex:%.2f;background:%s'></i>" % (v, col[x]) for x, v in sorted(share.items()))
+            bars = "".join("<i style='flex:%.2f;background:%s'></i>" % (v, stripe(col.get(acol[x][0], "#888")) if x in acol else col[x])
+                           for x, v in sorted(share.items()))
             bars += ("<i style='flex:%d;background:%s'></i>" % (data, KCOL[DATA]) if data else "") + ("<i style='flex:%d;background:%s'></i>" % (trans, KCOL[LOAD]) if trans else "")
             bars += "<i style='flex:%d;background:#4f9d4566'></i>" % free if free else ""
             w("<div class='pg%s' title='%s'>%s</div>" % (" sys" if pg < 4 else "", E(tip, True), bars))
@@ -1477,8 +1551,9 @@ def project_title():
     return setting("C64_VIEW_TITLE", "", root=ROOT, env=False)
 
 
-def map_of(used, other, disk, title, pr, prog=None):
-    """the map of a set of modules and disk files (the whole project, or one program): (page html, data, occ)"""
+def map_of(used, other, disk, title, pr, prog=None, dumps=None):
+    """the map of a set of modules and disk files (the whole project, or one program): (page html, data, occ); dumps (1.13) = the
+    probe dumps of this map, for the scenarios measured in VICE"""
     occ = layers(used, disk)
     areas, notes, scen, bad = annotations(used)
     if prog:                                          # (1.5) a ;@free note of the main module of another program is not about this one
@@ -1494,6 +1569,11 @@ def map_of(used, other, disk, title, pr, prog=None):
     low = low_map(used, areas, pr)                    # (1.6) pages 0-3
     ann = {"areas": areas, "scenarios": scenario_data(scen, used, disk, areas), "problems": bad, "pairs": label_pairs(used, areas),
            "free_after": fa, "free": fr, "low": low[0], "notes": free_notes(notes, fr, fa, low[1], low[2])}
+    if dumps:                                         # (1.13, TODO L11) scenarios measured in VICE
+        mscen, mtags = probe_scenarios(dumps, used, disk)
+        ann["measured"] = scenario_data(mscen, used, disk, [x for x in areas if not x.get("scenarios")])
+        for x in ann["measured"]:
+            x["sessions"] = mtags[x["name"]]
     for sc_, a, b, (lo, hi) in area_overlaps(areas):          # (1.6) ;@map areas of one scenario that overlap
         bad.append("%s:%d: area overlap in scenario %s: %s \"%s\" and %s \"%s\" (%s-%s; the other one: %s:%d)" % (
             a["file"], a["line"], sc_, a["name"], a["text"], b["name"], b["text"], h4(lo), h4(hi - 1), b["file"], b["line"]))
@@ -1517,6 +1597,8 @@ def map_of(used, other, disk, title, pr, prog=None):
     data["areas"] = [dict(x, to=x["to"] - 1) for x in areas]
     data["low_pages"] = ann["low"]
     data["scenarios"] = ann["scenarios"]
+    if ann.get("measured"):
+        data["scenarios_measured"] = ann["measured"]
     if ann["notes"]:                                  # (1.5) ;@free
         data["free_notes"] = [dict(x, to=x["to"] - 1) for x in ann["notes"]]
         data["free_by_use"] = {u: sum(x["free_after_start"] for x in ann["notes"] if x["use"] == u) for u in USES}
@@ -1697,7 +1779,7 @@ def main():
     dumps, ignored = probe_dumps(pdir, a.disk if disk else None, a.work)
     decl = declared_programs()
     if not decl:                                      # no programs declared: one map of everything (as before 1.4)
-        page, data, _ = map_of(used, other, disk, title, probe_summary(dumps, ignored))
+        page, data, _ = map_of(used, other, disk, title, probe_summary(dumps, ignored), dumps=dumps)
         open(os.path.join(a.out, "index.html"), "w").write(page)
         data = dict({"schema": 1}, **data)
         data["other_listings"] = [m.name for m in other]
@@ -1718,7 +1800,7 @@ def main():
     for p in progs:
         sub = dict(disk, files=[f for f in disk["files"] if f["name"] in p["files"]]) if disk else None
         pr = probe_summary(by_prog[p["name"]], 0) if dumps else (probe_summary([], ignored) if ignored else None)
-        page, d, occ = map_of(p["modules"], [], sub, title, pr, p)
+        page, d, occ = map_of(p["modules"], [], sub, title, pr, p, dumps=by_prog[p["name"]])
         open(os.path.join(a.out, "program-%s.html" % p["name"]), "w").write(page)
         maps[p["name"]] = dict({"name": p["name"], "main": p["main"], "files": p["files"], "page": "program-%s.html" % p["name"]}, **d)
         maps[p["name"]]["_occ"] = occ

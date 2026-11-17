@@ -49,7 +49,11 @@ lab64 images [--force] | check-env | version | upgrade | install [DIR]
 `lab64 up` starts, for the project of the current folder: **tools** (`lab64-tools` always on), **vc64web**, **viewer** and **player** (always
 started with the viewer: it renders `.sid` files for SID Studio; `C64_VIEW_PLAYER` only enables its VICE commands). `lab64 up vc64web`, `lab64 view` start one service; `lab64 down [service]` stops; `lab64 ps` lists.
 While **tools** is up, every tools command (`run`, `test`, `map`, `publish`, the default `build`) runs in it with `docker exec`
-instead of a new container; when it is down they run in one-shot containers (`docker run --rm`): same results.
+instead of a new container; when it is down they run in one-shot containers (`docker run --rm`): same results. (1.13) Two commands
+at the same time in the shared container do not mix: every VICE has its own remote monitor port (`vicemon.Vice().port`, `free_port()`;
+`$VMON` / `$VMON_PORT` of `vice_env.sh` for shell scripts) and an interrupted command (Ctrl-C, `kill`, closed terminal) takes its
+processes with it, VICE included (they carry `LAB64_EXEC_ID`; `cli/run.sh` kills them). A host process killed with SIGKILL still
+leaves them running until `lab64 down`.
 `C64_NO_EXEC=1` forces a new container. Measured on the development machine: 0.48 s against 0.52 s for an empty command (the
 gain is small on Linux; on Docker Desktop / WSL2 starting a container costs more, not measured). One project at a time: `lab64
 up` for another project asks to `lab64 down` the first. Network `lab64` and volume `lab64-x11` are shared by the stack and the

@@ -36,8 +36,34 @@ if [ "$IMG" = "lab64-tools:$VER" ] && [ -z "${C64_NO_EXEC:-}" ] &&
    [ "$(docker inspect -f '{{.State.Running}} {{index .Config.Labels "lab64.project"}}' lab64-tools 2>/dev/null)" = "true $ROOT" ]; then
     XE=""; P=""
     for w in ${C64_DOCKER_ARGS:-}; do [ "$P" = "-e" ] && XE="$XE -e $w"; P=$w; done
+    # (1.13, TODO L21) docker exec does not forward signals without a TTY: an interrupted command (Ctrl-C, closed terminal)
+    # went on running in the container, its VICE included. Every process of this command carries LAB64_EXEC_ID (inherited by
+    # its children, VICE and xvfb-run too, whatever their session): on INT / TERM / HUP the host kills them all.
+    ID="$(hostname)-$$-$(date +%s)"
+    U="$(id -u):$(id -g)"
+    DP=""
+    stop_exec() {
+        trap - INT TERM HUP
+        [ -z "$DP" ] || kill "$DP" 2>/dev/null || true
+        docker exec -u "$U" lab64-tools sh -c 'k() { for p in /proc/[0-9]*; do
+                tr "\0" "\n" < "$p/environ" 2>/dev/null | grep -qx "LAB64_EXEC_ID=$1" && kill "$2" "${p#/proc/}" 2>/dev/null; done; }
+            k "$1" -TERM; sleep 1; k "$1" -KILL; true' sh "$ID" >/dev/null 2>&1 || true
+        exit 130
+    }
+    trap stop_exec INT TERM HUP
+    rc=0
+    # with a TTY docker exec stays in the foreground (the terminal is its input; the pty forwards Ctrl-C, the trap runs after);
+    # without one it runs in the background and "wait" returns at once on a signal, so the trap runs while it still runs
     # shellcheck disable=SC2086
-    exec docker exec $TTY -u "$(id -u):$(id -g)" -w /work -e HOME=/work/out/tmp/home -e LANG=C.UTF-8 $ENVS $XE lab64-tools "$@"
+    if [ -n "$TTY" ]; then
+        docker exec $TTY -u "$U" -w /work -e HOME=/work/out/tmp/home -e LANG=C.UTF-8 -e LAB64_EXEC_ID="$ID" $ENVS $XE lab64-tools "$@" || rc=$?
+    else
+        docker exec -u "$U" -w /work -e HOME=/work/out/tmp/home -e LANG=C.UTF-8 -e LAB64_EXEC_ID="$ID" $ENVS $XE lab64-tools "$@" <&0 &
+        DP=$!
+        wait "$DP" || rc=$?
+    fi
+    trap - INT TERM HUP
+    exit $rc
 fi
 # Lab64 is mounted read-only, unless it IS the project (build-images.sh builds the vc64web pages in Lab64's own out/)
 LRO=":ro"; [ "$TC" = "$ROOT" ] && LRO=""

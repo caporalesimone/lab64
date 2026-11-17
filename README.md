@@ -11,7 +11,7 @@ uses it from its own folder through the `lab64` command and configures it with a
 
 ## At a glance
 
-- **Everything runs in containers.** Host requirements: sh, Docker with BuildKit and Compose v2, git, curl. Linux, or Windows through WSL2.
+- **Everything runs in containers.** Host requirements: sh, Docker with BuildKit and Compose v2, git, curl. Linux, or Windows through WSL2 (tried by the owner, 17/11).
 - **External programs** (64tass, cc65, cc1541, ZX0, VICE, sidplayfp, ...) are compiled from source inside the images.
 - **The Commodore ROMs are not included**: copy them into `roms/vice-roms/` before building the images ([roms/roms.md](roms/roms.md)).
   The images contain them, so they are never published.

@@ -100,7 +100,20 @@ button{font-family:inherit}
     width:calc(100vw - 2*(min(32vh,124px) + 30px));min-width:340px;max-width:100vw;border:1px solid #9d9784;border-bottom:none;border-radius:10px 10px 0 0;
     background:rgba(217,211,196,.93);padding:4px 4px 4px;gap:3px}
   #kbd .krow{gap:2px}
+  /* (1.13) the drive bar at the bottom (36 px): the controls stay above it instead of covering it */
+  #app:has(#drv:not([hidden])) #mid{bottom:calc(46px + env(safe-area-inset-bottom))}
+  #app:has(#drv:not([hidden])) #dpad{bottom:calc(50px + env(safe-area-inset-bottom))}
+  #app:has(#drv:not([hidden])) #fireBtn{bottom:calc(60px + env(safe-area-inset-bottom))}
+  #app:has(#drv:not([hidden])) #kbd{bottom:36px}
 }
+/* (1.13) PC (mouse): FIRE next to the stick, both on the right; on a phone (touch) they stay on opposite sides, one per thumb */
+@media (orientation:landscape) and (hover:hover) and (pointer:fine){
+  #fireBtn{left:auto;right:calc(max(14px,env(safe-area-inset-right)) + min(42vh,160px) + 18px)}
+  #app[data-kbd="1"] #fireBtn{right:calc(max(14px,env(safe-area-inset-right)) + min(32vh,124px) + 14px)}
+}
+/* (1.13) controls moved by the user (right button drag on a PC, or ✥ then drag): fixed position, remembered in the browser */
+#app.moving #controls>*,#app.moving #kbd{outline:2px dashed #f2c230;outline-offset:2px;cursor:move}
+.moved{position:absolute!important;right:auto!important;bottom:auto!important;transform:none!important;margin:0!important}
 
 /* ============ menu (panel) ============ */
 #sheet{position:fixed;z-index:100;inset:0;background:#fff;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch;
@@ -143,6 +156,7 @@ code{background:#eee;border-radius:4px;padding:0 3px}
     <button class="ib" id="bAudio" type="button" title="Audio" aria-label="Audio">🔇</button>
     <span id="status">stopped</span>
     <button class="ib txt" id="bPort" type="button" title="Joystick port">J2</button>
+    <button class="ib" id="bMove" type="button" title="Move the keyboard, stick and buttons: drag them (on a PC also the right mouse button, at any time). Double click here: back to their places" aria-label="Move controls">✥</button>
     <button class="ib" id="bFs" type="button" title="Full screen" aria-label="Full screen">⛶</button>
     <button class="ib" id="bMenu" type="button" title="Menu" aria-label="Menu">☰</button>
   </div>
@@ -745,6 +759,36 @@ function drvEvent(d){
   drvShow();
 }
 addEventListener('resize',drvDraw);
+
+/* (1.13) drag of the on-screen controls (landscape overlay only): right button drag on a PC at any time, or ✥ (move mode) and
+   then any pointer; positions in localStorage (lab64.vc64.pos), double click on ✥ puts them back */
+(function(){
+  const POSK='lab64.vc64.pos', ids=['dpad','fireBtn','mid','kbd'], land=()=>matchMedia('(orientation:landscape)').matches;
+  let pos={}; try{ pos=JSON.parse(lsGet(POSK)||'{}')||{}; }catch(e){ pos={}; }
+  const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+  function apply(){
+    for(const id of ids){ const el=$(id), p=pos[id];
+      if(p&&land()){ el.classList.add('moved'); el.style.left=clamp(p.x,0,innerWidth-40)+'px'; el.style.top=clamp(p.y,0,innerHeight-40)+'px'; }
+      else { el.classList.remove('moved'); el.style.left=''; el.style.top=''; } }
+  }
+  const moving=()=>$('app').classList.contains('moving');
+  $('bMove').onclick=()=>{ $('app').classList.toggle('moving'); $('bMove').classList.toggle('on',moving()); };
+  $('bMove').ondblclick=()=>{ pos={}; lsSet(POSK,'{}'); apply(); $('app').classList.remove('moving'); $('bMove').classList.remove('on'); };
+  for(const id of ids){
+    const el=$(id);
+    el.addEventListener('contextmenu',e=>{ if(land()) e.preventDefault(); });
+    el.addEventListener('pointerdown',e=>{
+      if(!land()||!(e.button===2||moving())) return;     // right button, or move mode: drag; otherwise the control works as usual
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      const r=el.getBoundingClientRect(), dx=e.clientX-r.left, dy=e.clientY-r.top;
+      el.setPointerCapture(e.pointerId);
+      const mv=ev=>{ pos[id]={x:ev.clientX-dx,y:ev.clientY-dy}; apply(); };
+      const up=()=>{ el.removeEventListener('pointermove',mv); el.removeEventListener('pointerup',up); el.removeEventListener('pointercancel',up); lsSet(POSK,JSON.stringify(pos)); };
+      el.addEventListener('pointermove',mv); el.addEventListener('pointerup',up); el.addEventListener('pointercancel',up);
+    },true);
+  }
+  addEventListener('resize',apply); apply();
+})();
 
 /* init */
 const firstRun = lsGet(LSK)===null;
