@@ -77,6 +77,8 @@ mouse or a finger.
 ![On-screen keyboard](screenshots/09-live-keyboard.png)
 
 **Joy 1** and **Joy 2** show a joystick and a fire button for port 1 and port 2; they can be combined with the keyboard.
+(1.14) **Move** in the header: the keyboard and the joysticks can be dragged, with the right mouse button at any time or with
+**Move** on and any pointer; the places stay in the browser, a double click on **Move** puts them back.
 
 ![On-screen joystick](screenshots/10-live-joystick.png)
 
