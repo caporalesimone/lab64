@@ -21,12 +21,14 @@ lab64 publish        # out/releases/v<version>/ + manifest.json for the viewer (
 lab64 clean          # deletes what a build recreates: out/work and out/tmp; --keep-release-only: everything but out/releases (also out/cache);
                      # --dry-run lists without deleting. Host command, needs lab64.env; never touches sources or git
 lab64 up [service...] / down [service...] / ps   # the compose stack: tools (always on), vc64web, viewer (+ player)
-lab64 view / stop    # viewer on http://localhost:6080         lab64 play <command>   e.g. VICE on the viewer screen
+lab64 view / stop    # viewer on http://localhost:6080         lab64 play <command>   a command on the viewer screen with audio
+lab64 screen [on|off|status]   # the remote screen of the viewer: off at start, on only when asked (see viewer.md)
+lab64 vice [--size WxH] [--bare|file|version]   # VICE with sound on the viewer screen (turns it on); lab64 vice --help
 lab64 run [-i IMAGE] <cmd>   # a command in lab64-tools (or lab64-IMAGE)        lab64 shell
 lab64 images [--force] | check-env | version | upgrade | install [DIR]
 ```
 
-- `lab64 test [--view|--no-view] [--emu]`: `--view` shows the tests on the viewer screen (the default when the viewer runs),
+- `lab64 test [--view|--no-view] [--emu]`: `--view` shows the tests on the viewer screen (turns the remote screen on; the default when it is already on),
   `--no-view` never; `--emu` starts vc64web for the run and stops it after, if it was off, and exports `C64_EMU=1` (passed to
   the containers). With a project test command (`C64_TEST`) `--emu` only exports `C64_EMU=1`: the command decides what to do
   with it (e.g. `lab64 up vc64web` first). `lab64 run` uses the viewer with `C64_VIEW=1`. Both reach the vc64web daemon when

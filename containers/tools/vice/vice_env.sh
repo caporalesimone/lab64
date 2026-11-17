@@ -1,5 +1,5 @@
 # Shell environment for VICE in Lab64 (13/11, moved from the game on 14/11). Copyright (c) 2026 - Simone Caporale
-# The same options as containers/tools/py/vicemon.py (keep them equal). Use in a bash script run in lab64-tools:  . /lab64/containers/tools/py/vice_env.sh
+# The same options as containers/tools/py/vicemon.py (keep them equal). Use in a bash script run in lab64-tools:  eval "$(lab64 vice-env)"   (or . /lab64/containers/tools/vice/vice_env.sh)
 #   R, RD  ROM folders: $C64_ROMS/vice-roms/C64 and .../DRIVES ($C64_ROMS=/opt/roms in the image)
 #   VROM   x64sc options: factory settings (-default: no user configuration) and ALL the ROMs of Lab64 roms/
 #          (Kernal, Basic, chargen and the drives): VICE reads nothing from its data folder or from /usr/share

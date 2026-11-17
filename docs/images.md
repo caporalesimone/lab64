@@ -6,7 +6,7 @@ How the Lab64 images are built and what each one contains. The external programs
 [external-programs.md](external-programs.md); the host and container layout is in [architecture.md](architecture.md).
 
 One multi-stage Dockerfile, `docker/Dockerfile`: one image per target, all with the same parent. Tags: `lab64-<name>:<VERSION>`
-(file `VERSION`, today 1.11) and `lab64-<name>:latest`. A project can require a version: `LAB64_VERSION` in its `lab64.env`
+(file `VERSION`, today 1.12) and `lab64-<name>:latest`. A project can require a version: `LAB64_VERSION` in its `lab64.env`
 (the scripts stop if it differs).
 
 | Image | Target | Contents | Runs |

@@ -45,6 +45,7 @@ services:
       VIEW_PASSWORD: ${VIEW_PASSWORD:-}
       VIEW_HOSTS: ${VIEW_HOSTS:-}
       VIEW_SIZE: ${VIEW_SIZE:-1280x1000}
+      VIEW_SCREEN: ${VIEW_SCREEN:-off}     # (1.12) the remote screen (Xvnc) starts only on request; "on" = with the viewer
       VIEW_DISK: ${C64_VIEW_DISK:-}
       VIEW_TITLE: ${C64_VIEW_TITLE:-}
       VIEW_PLAYER: ${C64_VIEW_PLAYER:-}
@@ -69,6 +70,7 @@ services:
       DISPLAY: ":99"
       PULSE_SERVER: unix:/tmp/.X11-unix/pulse
       C64_VIEW_PLAYER: ${C64_VIEW_PLAYER:-}
+      VIEW_SIZE: ${VIEW_SIZE:-1280x1000}   # default window size of "lab64 vice"
     volumes: *project
     network_mode: none             # (kept in 1.8, with render) only Unix sockets of lab64-x11 (screen :99, audio, player socket): no network, no "<project>_default"
     depends_on: [viewer]

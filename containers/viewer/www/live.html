@@ -27,6 +27,10 @@
      to that size and everything on it (VICE too) looks z times bigger */
   #scr { flex:1; position:relative; overflow:hidden; --z:1; }
   #scr iframe { position:absolute; left:0; top:0; border:0; width:calc(100% / var(--z)); height:calc(100% / var(--z)); transform:scale(var(--z)); transform-origin:0 0; }
+  /* (1.12) the remote screen starts OFF: the page asks to turn it on and loads the screen only then */
+  #scrOff { position:absolute; inset:0; display:none; align-items:center; justify-content:center; text-align:center; background:#000; color:var(--fg); }
+  #scrOff p { color:var(--dim); max-width:34ch; margin:8px auto 14px; }
+  #scr.off #scrOff { display:flex; } #scr.off iframe { display:none; }
   .zoom { display:flex; align-items:center; gap:6px; }
   .zoom output { min-width:4.5ch; text-align:center; color:var(--acc); font:600 13px "DejaVu Sans Mono", ui-monospace, monospace; }
 
@@ -68,11 +72,29 @@
   <span class="zoom" title="Makes the screen (and VICE) bigger or smaller: the remote screen gets the size of the page divided by the zoom">
     <button id="zOut" title="Smaller">&minus;</button><output id="zV">100%</output><button id="zIn" title="Bigger">+</button>
   </span>
+  <button id="scrBtn" title="Turns the remote screen off (VICE on it is closed)">Screen: on</button>
   <span id="st"></span>
 </header>
-<div id="scr"><iframe src="vnc/index.html?autoconnect=1&amp;view_only=0&amp;resize=remote&amp;show_control_bar=true&amp;clipboard_up=true&amp;clipboard_down=true" allow="clipboard-read; clipboard-write"></iframe></div>
+<div id="scr"><iframe data-src="vnc/index.html?autoconnect=1&amp;view_only=0&amp;resize=remote&amp;show_control_bar=true&amp;clipboard_up=true&amp;clipboard_down=true" allow="clipboard-read; clipboard-write"></iframe>
+  <div id="scrOff"><div><b>Remote screen off</b><p>Nothing is drawn or streamed until you turn it on (it uses CPU and bandwidth).</p><button id="scrOn2">Turn on remote screen</button></div></div></div>
 <div id="ov"><div id="kb"></div><div class="joy" id="j1"></div><div class="joy" id="j2"></div></div>
 <script>
+// (1.12) remote screen on/off: GET/POST /screen; the KasmVNC iframe is loaded only while it is on
+const scrEl = document.getElementById('scr'), scrIfr = scrEl.querySelector('iframe'), scrBtn = document.getElementById('scrBtn');
+async function screenSet(on) {
+  if (on === undefined) { try { on = (await (await fetch('screen', { cache: 'no-store' })).json()).on === true; } catch (e) { on = false; } }
+  else {
+    try { on = (await (await fetch('screen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) })).json()).on === true; }
+    catch (e) { on = false; }
+  }
+  scrEl.classList.toggle('off', !on);
+  scrBtn.style.display = on ? '' : 'none';
+  if (on && !scrIfr.getAttribute('src')) scrIfr.setAttribute('src', scrIfr.dataset.src);
+  if (!on) scrIfr.removeAttribute('src');
+}
+scrBtn.onclick = () => screenSet(false);
+document.getElementById('scrOn2').onclick = () => screenSet(true);
+screenSet();
 let ctx = null, ws = null, next = 0, rest = null, gain = null;
 const btn = document.getElementById('audioBtn'), st = document.getElementById('st');
 // (14/11) volume: one GainNode between the audio blocks and the speakers; the value is remembered in this browser

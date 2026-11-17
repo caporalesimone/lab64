@@ -9,6 +9,9 @@
 //   /out/        the project out/ folder, read-only (mounted at /srv/out), with folder listings
 //   /control     (14/11) POST JSON {"cmd":"status"|"play"|"basic"|"stop","disk":"releases/v<V>/<file>.d64"}: VICE on the live
 //                screen, forwarded to the player (containers/tools/py/viewer_player.py, container lab64-player) through the Unix socket in lab64-x11
+//   /screen      (1.12) GET -> {"ok":true,"on":bool}; POST JSON {"on":true|false}: turns the remote screen (Xvnc :99) on or off. OFF at start
+//                (VIEW_SCREEN=on starts it with the viewer): with it off nothing draws, encodes or streams the screen, and /websockify, /input
+//                answer 503. Same Host / same-origin / JSON-only / password rules as /control
 //   /render      (1.8) POST JSON {"src": "releases/v1/x.sid" | "sid_b64": "<base64 of a .sid>", "params": {...}}: SID Studio renders a
 //                tune with sidplayfp in the player container (containers/tools/py/sidrender.py) -> {"ok":true,"file":"cache/sidrender/<sha>.wav",
 //                "seconds","took","cached","params","tune"}; the WAV is then fetched from /out/cache/sidrender/<sha>.wav. Same
@@ -20,6 +23,7 @@
 // /control wants Content-Type application/json (a form of another site cannot send it without a preflight, never granted here).
 'use strict';
 const http = require('http'), fs = require('fs'), path = require('path'), net = require('net');
+const { spawn } = require('child_process');
 const { WebSocketServer, WebSocket } = require('ws');
 const PulseAudio = require('pulseaudio2');
 
@@ -37,6 +41,55 @@ function sameOrigin(req) {                                      // no Origin (cu
   const o = req.headers.origin;
   if (!o) return true;
   try { return new URL(o).host === req.headers.host; } catch (e) { return false; }
+}
+// --- the remote screen (1.12): Xvnc :99 is a child of this process, started on request. Local clients without X authorization (-ac),
+// no TCP for X, WebSocket on 127.0.0.1:6901 (not published). -PublicIP: without it Xvnc 1.5 queries STUN servers on the Internet.
+const X_SOCK = '/tmp/.X11-unix/X99';
+const GEOM = String(process.env.VIEW_SIZE || '1280x1000').split('x').slice(0, 2).join('x');
+let xvnc = null, xstarting = null;
+const screenOn = () => xvnc !== null && fs.existsSync(X_SOCK);
+function vncUp() { return new Promise(r => { const c = net.connect(VNC_PORT, '127.0.0.1', () => { c.destroy(); r(true); }); c.on('error', () => r(false)); }); }
+function startScreen() {
+  if (xstarting) return xstarting;
+  if (screenOn()) return Promise.resolve(true);
+  xstarting = (async () => {
+    for (const f of ['/tmp/.X99-lock', X_SOCK]) { try { fs.unlinkSync(f); } catch (e) { /* not there */ } }
+    const log = fs.openSync('/tmp/xvnc.log', 'a');
+    const p = spawn('Xvnc', [':99', '-geometry', GEOM, '-depth', '24', '-ac', '-nolisten', 'tcp', '-extension', 'MIT-SHM', '-PublicIP', '127.0.0.1',
+      '-websocketPort', String(VNC_PORT), '-interface', '127.0.0.1', '-disableBasicAuth', '-SecurityTypes', 'None', '-sslOnly', '0', '-AlwaysShared',
+      '-httpd', '/usr/share/kasmvnc/www', '-RectThreads', '0', '-Log', '*:stderr:30'], { stdio: ['ignore', log, log] });
+    xvnc = p;
+    p.on('exit', () => { if (xvnc === p) xvnc = null; for (const f of ['/tmp/.X99-lock', X_SOCK]) { try { fs.unlinkSync(f); } catch (e) { /* gone */ } } });
+    for (let i = 0; i < 100 && xvnc === p; i++) {
+      if (fs.existsSync(X_SOCK) && await vncUp()) { try { fs.chmodSync(X_SOCK, 0o777); } catch (e) { /* ignore */ } return true; }
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return screenOn();
+  })().finally(() => { xstarting = null; });
+  return xstarting;
+}
+function stopScreen() {
+  return new Promise(resolve => {
+    if (!xvnc) return resolve();
+    const p = xvnc; p.once('exit', () => resolve()); p.kill('SIGTERM');
+    setTimeout(() => { try { p.kill('SIGKILL'); } catch (e) { /* gone */ } }, 3000);
+  });
+}
+function screenApi(req, res) {
+  const send = (code, o) => { res.statusCode = code; res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store'); res.end(JSON.stringify(o)); };
+  if (req.method === 'GET') return send(200, { ok: true, on: screenOn() });
+  if (req.method !== 'POST') return send(405, { ok: false, error: 'GET or POST only' });
+  if (!sameOrigin(req)) return send(403, { ok: false, error: 'different origin' });
+  if (!String(req.headers['content-type'] || '').startsWith('application/json')) return send(415, { ok: false, error: 'application/json required' });
+  let body = '';
+  req.on('data', d => { body += d; if (body.length > 256) req.destroy(); });
+  req.on('end', async () => {
+    let q;
+    try { q = JSON.parse(body); } catch (e) { return send(400, { ok: false, error: 'invalid JSON' }); }
+    if (typeof q.on !== 'boolean') return send(400, { ok: false, error: '"on" must be true or false' });
+    if (q.on) { const ok = await startScreen(); return send(ok ? 200 : 500, { ok, on: screenOn(), error: ok ? undefined : 'Xvnc did not start (see /tmp/xvnc.log in the viewer container)' }); }
+    await stopScreen(); send(200, { ok: true, on: screenOn() });
+  });
 }
 function control(req, res) {
   const fail = (code, msg) => { res.statusCode = code; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: false, error: msg })); };
@@ -177,6 +230,7 @@ const server = http.createServer((req, res) => {
     return res.end(`window.VIEW_DISK = "${DISK}";\nwindow.VIEW_TITLE = ${TITLE};\nwindow.VIEW_PLAYER = ${PLAYER};\n`);
   }
   if (urlPath === '/control') return control(req, res);
+  if (urlPath === '/screen') return screenApi(req, res);
   if (urlPath === '/render') return render(req, res);
   if (urlPath === '/out') { res.statusCode = 301; res.setHeader('Location', '/out/'); return res.end(); }
   if ((req.method === 'GET' || req.method === 'HEAD') && (urlPath === '/out/cache/vc64web/' || urlPath.startsWith('/out/cache/vc64web/'))) return emuPages(req, res, urlPath);
@@ -255,6 +309,7 @@ inWss.on('connection', ws => {
 server.on('upgrade', (req, sock, head) => {
   if (!hostOk(req) || !sameOrigin(req)) { sock.end('HTTP/1.1 403 Forbidden\r\n\r\n'); return; }
   if (!authorized(req)) { sock.end('HTTP/1.1 401 Unauthorized\r\n\r\n'); return; }
+  if (!req.url.startsWith('/audio') && !screenOn()) { sock.end('HTTP/1.1 503 Service Unavailable\r\n\r\n'); return; }   // remote screen off
   if (req.url.startsWith('/input')) { inWss.handleUpgrade(req, sock, head, ws => inWss.emit('connection', ws, req)); return; }
   if (req.url.startsWith('/audio')) { wss.handleUpgrade(req, sock, head, ws => wss.emit('connection', ws, req)); return; }
   const up = net.connect(VNC_PORT, '127.0.0.1', () => {
@@ -269,4 +324,5 @@ server.on('upgrade', (req, sock, head) => {
   up.on('error', () => sock.destroy()); sock.on('error', () => up.destroy());
 });
 
+if (process.env.VIEW_SCREEN === 'on') startScreen();
 server.listen(PORT, () => console.log(`viewer ready: http://localhost:${PORT}` + (PASS ? ' (password)' : '')));

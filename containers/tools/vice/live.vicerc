@@ -1,0 +1,13 @@
+; VICE settings of "lab64 vice" (loaded with -addconfig). Copyright (c) 2026 - Simone Caporale
+; Joystick 1 (port 1) = keyset 1 on the keys F13-F17, which nobody else uses: they are what the "Joy 1" overlay of live.html sends.
+; The values are GDK keysyms in decimal: F13 65482, F14 65483, F15 65484, F16 65485, F17 65486.
+[Version]
+ConfigVersion=3.10
+
+[C64SC]
+KeySetEnable=1
+KeySet1North=65482
+KeySet1South=65483
+KeySet1West=65484
+KeySet1East=65485
+KeySet1Fire=65486

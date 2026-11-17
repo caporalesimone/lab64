@@ -35,11 +35,12 @@ of a project.
 | `C64_TEST_CAPS` | duration caps of the test engine, e.g. `test=10 smoke=20 smoke+sanity=35` (seconds) |
 | `C64_PASS_ENV` | host variables passed to the containers by `run.sh` (besides `EMU_URL`, `C64_VIEW`, `DISPLAY`, `PULSE_SERVER`, `C64_MEMPROBE`, `C64_HOST_DIR`, `C64_EMU`); passed by name, so values with spaces are safe |
 | `C64_TEST_REASON_WORDS` | extra words that pick the failure reason of a `script()` test from its output (default FAIL, error, ERROR), e.g. `"ATTENZIONE"` for a program that reports in Italian |
+| `VIEW_SCREEN` | `off` (default) or `on`: the remote screen of the viewer (live window, VICE live) starts only on request, or with the viewer. See [viewer.md](viewer.md) |
 | `VIEW_PORT`, `VIEW_PASSWORD`, `VIEW_HOSTS`, `VIEW_SIZE` | viewer: port on localhost (6080), password of the whole viewer (none by default), host names allowed besides localhost (the server refuses the others against DNS rebinding), screen size (1280x1000). Read from `lab64.env` or the environment when the viewer starts (`lab64 up`, `lab64 view`) |
 | `C64_EXTRA_IMAGES` | project images checked by `lab64 check-env` |
 | `C64_VIEW_DISK` | disk proposed first in the viewer page (pattern with `*`, the highest version wins) |
 | `C64_VIEW_TITLE` | project name in the header of the viewer page |
-| `C64_VIEW_PLAYER` | command that opens a file (`.d64 .g64 .prg .t64 .crt`, path relative to the project; `--bare` = no disk) on the viewer screen; without it the VICE buttons of the page are off (SID Studio's rendering does not depend on it) |
+| `C64_VIEW_PLAYER` | command that opens a file (`.d64 .g64 .prg .t64 .crt`, path relative to the project; `--bare` = no disk) on the viewer screen; `lab64 vice` is the one Lab64 provides (`C64_VIEW_PLAYER="lab64 vice"`, optionally `--size WxH`, `--config FILE`); without it the VICE buttons of the page are off (SID Studio's rendering does not depend on it) |
 
 Other variables: `C64_PROJECT` (project folder, default the current one), `C64_CA_BUNDLE` (CA of a TLS-intercepting proxy, a
 secret for npm/pip in the builds), `C64_DOCKER_ARGS` (extra `docker run` options, split on spaces), `C64_HOST_DIR` (set by the

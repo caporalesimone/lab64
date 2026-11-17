@@ -301,7 +301,7 @@ function card(v) {
   if (diskPath) {
     const u = vcLink(diskPath);
     acts.push(u ? `<a class="key dark" href="${esc(u)}" target="_blank">▶ vc64web</a>` : '<button disabled title="vc64web page not available (lab64 up vc64web)">vc64web</button>');
-    acts.push(`<button data-play="${esc(diskPath)}" ${PLAYER === false ? 'disabled title="player not running"' : ''}>${playing ? '■ VICE running' : '▶ VICE live'}</button>`);
+    acts.push(`<button data-play="${esc(diskPath)}" ${PLAYER === false ? 'disabled title="player not running"' : SCREEN !== true ? 'disabled title="turn on the remote screen first (VICE live card)"' : ''}>${playing ? '■ VICE running' : '▶ VICE live'}</button>`);
     acts.push(`<a class="key" href="${esc(base + encodeURIComponent(disk))}" download>↓ .d64</a>`);
   }
   if (v.m) acts.push(`<a class="key" href="${esc(base + 'manifest.json')}" target="_blank">manifest</a>`);
@@ -496,8 +496,26 @@ async function pollStatus() {
     lastTestsState = t.state;
   }
 }
+// (1.12) the remote screen (live window, VICE live, thumbnail) is OFF at start: it costs CPU. Only the user's switch turns it on.
+let SCREEN = null;
+async function screenGet() { try { return (await (await fetch('screen', { cache: 'no-store' })).json()).on === true; } catch (e) { return null; } }
+async function screenSet(on) {
+  if (!on) showBig(false);
+  try { await fetch('screen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) }); } catch (e) { /* shown by the next poll */ }
+  await pollPlayer(); if (VERS.length) render();
+}
+function applyScreen() {
+  const off = SCREEN !== true;
+  document.body.classList.toggle('noscreen', off);
+  for (const b of document.querySelectorAll('[data-play],[data-basic],#openbig,#plive')) { b.disabled = off || PLAYER === false; b.title = off ? 'turn on the remote screen first (VICE live card)' : ''; }
+  for (const a of document.querySelectorAll('a[href="live.html"]')) a.style.pointerEvents = off ? 'none' : '', a.style.opacity = off ? '.5' : '';
+  if (off) { showBig(false); miniOn(false); } else miniOn(!$('mini').classList.contains('closed') && !$('big').classList.contains('open'));
+  $('mini').style.display = off ? 'none' : '';
+  document.body.classList.toggle('pad', !off && !$('mini').classList.contains('closed'));
+}
 async function pollPlayer() {
-  const r = await control('status');
+  SCREEN = await screenGet();
+  const r = SCREEN === true ? await control('status') : { ok: true, running: false, screenOff: true };
   const was = JSON.stringify(PLAYER);
   if (!r.ok) {
     PLAYER = false;
@@ -508,9 +526,14 @@ async function pollPlayer() {
       ? `<div class="state"><span class="led running"></span>RUNNING</div><div class="meta" style="margin-top:6px;word-break:break-all">${r.disk ? esc(r.disk) : 'no disk (READY.)'}</div><div class="meta">since ${ago(r.since)}</div>` +
         `<div class="actions"><button id="plive" class="dark">▶ Play / try</button><button id="pstop" class="warnk">■ Close</button></div>`
       : `<div class="state"><span class="led"></span>STOPPED</div><div class="note" style="margin-top:6px">"VICE live" on a version or "Empty VICE" below: real speed, audio, keyboard and joysticks from the browser.</div>`;
+    if (r.screenOff) $('player').innerHTML = `<div class="state"><span class="led"></span>REMOTE SCREEN OFF</div><div class="note" style="margin-top:6px">The live window and VICE live use CPU: they start only when you turn the remote screen on.</div><div class="actions"><button id="scron" class="dark">Turn on remote screen</button></div>`;
+    else $('player').insertAdjacentHTML('beforeend', `<div class="actions"><button id="scroff">Turn off remote screen</button></div>`);
+    if ($('scron')) $('scron').onclick = () => screenSet(true);
+    if ($('scroff')) $('scroff').onclick = () => screenSet(false);
     if ($('pstop')) $('pstop').onclick = async () => { await control('stop'); await pollPlayer(); };
     if ($('plive')) $('plive').onclick = () => showBig(true);
   }
+  applyScreen();
   if (was !== JSON.stringify(PLAYER) && VERS.length) render();
 }
 
@@ -519,6 +542,7 @@ async function pollPlayer() {
 // window = live.html (interactive). With the big one open, the thumbnail disconnects (one VNC connection at a time from this page).
 const MINI_URL = 'vnc/index.html?autoconnect=1&resize=scale&view_only=1&show_control_bar=false&reconnect=1&reconnect_delay=2000';
 function miniOn(on) {
+  if (on && SCREEN !== true) on = false;                 // (1.12) no connection while the remote screen is off
   const fr = document.querySelector('#mini .frame'), ifr = fr.querySelector('iframe');
   if (on && !ifr) fr.insertAdjacentHTML('afterbegin', `<iframe src="${MINI_URL}" title="live screen (thumbnail)" tabindex="-1"></iframe>`);
   if (!on && ifr) ifr.remove();
@@ -547,7 +571,7 @@ $('openbig').onclick = () => showBig(true);
 $('bigclose').onclick = () => showBig(false);
 $('minitog').onclick = () => miniOpen($('mini').classList.contains('closed'));
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('big').classList.contains('open')) showBig(false); });
-miniOpen(store.get('mini') !== '0');
+miniOpen(store.get('mini') !== '0'); miniOn(false);   // the thumbnail connects only when the remote screen is on (applyScreen)
 
 // ---------------------------------------------------------------- try it yourself: files in out/tmp/
 async function loadMine() {

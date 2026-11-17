@@ -27,7 +27,7 @@ From any folder (example with Lab64 in `~/repos/lab64`):
 
 ```sh
 ~/repos/lab64/cli/lab64 install       # or: .../cli/lab64 install /another/folder
-lab64 version                                   # prints: Lab64 1.11 (<lab64 folder>)
+lab64 version                                   # prints: Lab64 1.12 (<lab64 folder>)
 ```
 
 What it does, and nothing else: creates the folder if missing (default `~/.local/bin`), creates or replaces there a symbolic link
@@ -174,6 +174,8 @@ in no program) and one map per program (`program-intro.html`, `program-game.html
   `lab64 up vc64web` if it needs the in-browser emulator).
 - Viewer on another port, with a password: `VIEW_PORT="6081"`, `VIEW_PASSWORD="..."` in `lab64.env` (also `VIEW_HOSTS`,
   `VIEW_SIZE`); they apply the next time the viewer starts (`lab64 stop && lab64 view`).
+- The remote screen of the viewer (live window, VICE live) is **off** at start because it is heavy: turn it on from the page, with `lab64 screen on`, or
+  always with `VIEW_SCREEN="on"` ([viewer.md](viewer.md)).
 - Own release content and measures: a script that calls `c64publish.publish(...)` (see [publishing.md](publishing.md)).
 - The program version: `C64_VERSION` in `lab64.env` (or computed by your build and passed to `lab64 publish --version`).
 - A fixed Lab64 version: `LAB64_VERSION` in `lab64.env` (the commands stop on another version; `lab64 check-env` reports it).

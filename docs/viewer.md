@@ -2,15 +2,29 @@
 
 Copyright © 2026 - Simone Caporale
 
-The control center, the live screen, vc64web in the browser and SID Studio, served by the `lab64-viewer` container, and the two
+The control center, the live screen, vc64web in the browser and SID Studio, served by the `lab64-viewer` container, and the
 JSON endpoints that sit behind it. The compose stack that starts it is in [command-line.md](command-line.md#services-the-compose-stack-dockercomposeyaml).
 
 `lab64 view` (or `lab64 up`) serves the control center at `http://localhost:6080`. The screenshots below (in
 [screenshots/](screenshots/)) were taken in Chromium (1280 px wide) on a project made by `lab64 init`, with four versions
 published (`v0.1` to `v0.4`, one failing test in `v0.3`) and one small `.sid` tune: they show what any project gets, whatever it is.
 Nothing here is configured by Lab64 itself: the page only reads what the project writes (`out/tmp/*.json`, `out/releases/`, see
-[manifest.md](manifest.md)). The viewer settings (`VIEW_PORT`, `VIEW_PASSWORD`, `VIEW_HOSTS`, `VIEW_SIZE`, `C64_VIEW_*`) are in
+[manifest.md](manifest.md)). The viewer settings (`VIEW_PORT`, `VIEW_PASSWORD`, `VIEW_HOSTS`, `VIEW_SIZE`, `VIEW_SCREEN`, `C64_VIEW_*`) are in
 [configuration.md](configuration.md).
+
+## Remote screen: off until you turn it on (1.12)
+
+The live window, VICE live and the thumbnail are served from a virtual screen (KasmVNC `Xvnc :99`) that encodes and streams every frame to the
+browser, plus VICE drawing on it: together they are heavy. Since 1.12 the screen **does not exist** when the viewer starts. The control center and
+SID Studio work as before; the tests and the VICE commands of the scripts run on a hidden screen (`xvfb-run`), as always when the viewer screen is not used.
+
+- **Turn it on:** the **Turn on remote screen** button of the VICE live card, the same button in `live.html`, `lab64 screen on`, or `VIEW_SCREEN=on` in `lab64.env`
+  (on at every start). Commands that want the screen (`lab64 vice`, `lab64 play`, `lab64 test --view`) turn it on by themselves.
+- **Turn it off:** **Turn off remote screen** (VICE live card), **Screen: on** in `live.html`, `lab64 screen off`: Xvnc stops and VICE on it is closed.
+- While it is off the VICE buttons, **Big screen** and the thumbnail are disabled/hidden, `/websockify` and `/input` answer 503 and the player refuses
+  `play` / `basic` with the code `screen-off`. `lab64 test` without options uses the viewer screen **only if it is already on**.
+- `lab64 screen status` prints `on`, `off` or `viewer not running`.
+- Audio (PulseAudio, `/audio`) is separate and always there: it costs nothing when nobody listens.
 
 ## Control center
 
@@ -18,7 +32,7 @@ Nothing here is configured by Lab64 itself: the page only reads what the project
 the **THEME** button (light / dark, remembered in the browser). Three cards follow, refreshed every 2 s: **Build** (state, phase and
 duration of the running or last build, from `out/tmp/build.json`), **Test** (live progress and the last results, from `out/tmp/tests.json`)
 and **VICE live** (the disk VICE is running on the live screen, with **Play / try** and **Close**). The small **LIVE** window at the bottom
-right is a mini view of the live screen (⤢ opens the big one, – minimizes it).
+right is a mini view of the live screen (⤢ opens the big one, – minimizes it); it appears only while the remote screen is on.
 
 ![Control center](screenshots/01-control-center.png)
 

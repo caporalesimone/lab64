@@ -10,6 +10,10 @@ in those containers call it directly. Project in the current folder (/work), Lab
   lab64 test [args]          the test engine (containers/tools/test/run.py): [smoke|sanity|regression|all ...] [-k ID|prefix ...] [--list]
   lab64 manual [args]        the manual (lab64-pdf-gen): C64_MANUAL of lab64.env if set (a command run here), else c64manual
                              (source manual/manual.html, theme C64_MANUAL_THEME; lab64 manual --help)
+  lab64 vice [--size WxH] [--bare | file | version]   VICE with sound, joysticks and the viewer overlay keys (lab64-tools, on the viewer
+                             screen: use it from the host as "lab64 vice"; lab64 vice --help)
+  lab64 vice-env             prints the shell line that loads VROM / XRUN (the VICE options of Lab64) for project bash scripts:
+                             eval "$(lab64 vice-env)"
   lab64 map [args]           automatic memory and disk map (containers/tools/memmap/c64map.py; lab64 map --help); one map per program
                              with C64_MAP_PROGRAM_<NAME> in lab64.env
 The host-only commands (view, up, images, ...) are not available here."""
@@ -101,6 +105,73 @@ def manual(args):
 
 def memmap(args):
     os.execvp(sys.executable, [sys.executable, os.path.join(LAB64, "containers", "tools", "memmap", "c64map.py")] + args)
+
+
+VICE_DIR = os.path.join(LAB64, "containers", "tools", "vice")
+VICE_HELP = """lab64 vice [--size WIDTHxHEIGHT] [--config FILE] [--bare | FILE | VERSION]
+  VICE (x64sc) for hands-on tries: factory settings + all the ROMs of Lab64, sound on PulseAudio, joystick 2 = numeric keypad (what most games
+  use), joystick 1 = keys F13-F17 (the overlay of live.html), the window size given at start (no window manager on the viewer screen).
+  FILE     .d64 .g64 .prg .t64 .crt (path from the project folder); VERSION  e.g. 1.239: the disk of out/releases/v<VERSION>/ named by C64_VIEW_DISK
+  (none)   the disk named by C64_VIEW_DISK in out/releases/latest/        --bare  no disk (READY. of the BASIC)
+  --size   window in pixels; default 86% x 80% of VIEW_SIZE (1100x800 with the 1280x1000 screen)
+  --config an extra VICE configuration file of the project, loaded after Lab64's (repeatable)
+  Needs the viewer screen: from the host "lab64 vice ..." turns it on (lab64 screen on); the viewer page runs it through C64_VIEW_PLAYER."""
+
+
+def vice_disk(arg):
+    import fnmatch
+    pat = setting("C64_VIEW_DISK", "*.d64")
+    if arg is None:
+        d = os.path.join("out", "releases", "latest")
+    elif re.match(r"^v?\d[\w.-]*$", arg):
+        d = os.path.join("out", "releases", "v" + arg.lstrip("v"))
+    else:
+        return arg
+    names = sorted(n for n in (os.listdir(d) if os.path.isdir(d) else []) if fnmatch.fnmatch(n, pat))
+    if not names:
+        sys.exit("lab64 vice: no disk %s in %s/ (build first: lab64 build)" % (pat, d))
+    return os.path.join(d, names[-1])
+
+
+def vice(args):
+    if args and args[0] in ("-h", "--help", "help"):
+        sys.exit(VICE_HELP)
+    size, cfg, bare, rest, i = None, [], False, [], 0
+    while i < len(args):
+        a = args[i]
+        if a == "--size" and i + 1 < len(args):
+            size = args[i + 1]; i += 2
+        elif a == "--config" and i + 1 < len(args):
+            cfg.append(args[i + 1]); i += 2
+        elif a == "--bare":
+            bare = True; i += 1
+        else:
+            rest.append(a); i += 1
+    if len(rest) > 1:
+        sys.exit(VICE_HELP)
+    if size is None:
+        w, h = (setting("VIEW_SIZE", "1280x1000") + "x").split("x")[:2]
+        size = "%dx%d" % (int(w) * 86 // 100, int(h) * 80 // 100)
+    if not re.match(r"^\d+x\d+$", size):
+        sys.exit("lab64 vice: --size WIDTHxHEIGHT (e.g. 1100x800)")
+    disk = None if bare else vice_disk(rest[0] if rest else None)
+    if disk is not None and not os.path.isfile(disk):
+        sys.exit("lab64 vice: %s not found" % disk)
+    if not os.environ.get("DISPLAY") or not os.environ.get("PULSE_SERVER"):
+        print("lab64 vice: no viewer screen or audio here (DISPLAY, PULSE_SERVER): use the host command lab64 vice", file=sys.stderr)
+    w, h = size.split("x")
+    cmd = ["-addconfig", os.path.join(VICE_DIR, "live.vicerc")]
+    for c in cfg:
+        cmd += ["-addconfig", c]
+    cmd += ["-sounddev", "pulse", "-controlport1device", "1", "-controlport2device", "1", "-keyset", "-joydev1", "2", "-joydev2", "1",
+            "-windowwidth", w, "-windowheight", h]
+    if disk:
+        cmd += ["-autostart", disk]
+    os.execvp("bash", ["bash", "-c", ". " + os.path.join(VICE_DIR, "vice_env.sh") + '; exec x64sc $VROM "$@"', "lab64-vice"] + cmd)
+
+
+def vice_env(args):
+    print(". " + os.path.join(VICE_DIR, "vice_env.sh"))
 
 
 # ------------------------------------------------------------------ project skeleton of "lab64 init"
@@ -303,7 +374,8 @@ def hello(ctx):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    cmds = {"init": init, "build": build, "publish": publish, "test": test, "manual": manual, "map": memmap}
+    cmds = {"init": init, "build": build, "publish": publish, "test": test, "manual": manual, "map": memmap,
+            "vice": vice, "vice-env": vice_env}
     if not a or a[0] not in cmds:
         sys.exit(__doc__ if not a or a[0] in ("help", "-h", "--help") else
                  "lab64 %s: a host command (run it on the host, not in a Lab64 container)\n" % a[0] + __doc__)

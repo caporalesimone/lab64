@@ -24,7 +24,7 @@ build-scripts/          host scripts that build the images: build-images.sh, che
 docker/                 Dockerfile (all images but vc64web), compose.yaml (the services)
 containers/
   common/               goes into every image: lab64-worker (container side of `lab64`), py/ (lab64env, d64, psid)
-  tools/                lab64-tools: py/ (c64test, vicemon, c64publish, sidrender, viewer_player, vice_env.sh), test/run.py, memmap/
+  tools/                lab64-tools: py/ (c64test, vicemon, c64publish, sidrender, viewer_player), vice/ (vice_env.sh, live.vicerc), test/run.py, memmap/
   pdf-gen/              lab64-pdf-gen: c64manual.py, themes/
   viewer/               lab64-viewer: server.js, start.sh, www/ (control center, live screen, SID Studio), jsSID patch
   vc64web/              lab64-vc64web: its own Dockerfile, headless daemon and client, page builders, docs

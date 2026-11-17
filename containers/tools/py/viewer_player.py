@@ -56,7 +56,12 @@ def stop():
     cur.update(p=None, disk=None, since=None)
 
 
+SCREEN_SOCK = "/tmp/.X11-unix/X99"                 # exists only while the remote screen of the viewer is on (1.12)
+
+
 def launch(args, label):
+    if not os.path.exists(SCREEN_SOCK):
+        return {"ok": False, "error": "the remote screen is off: turn it on first (lab64 screen on, or the switch in the page)", "code": "screen-off"}
     stop()
     cur["p"] = subprocess.Popen(CMD + args, cwd=ROOT, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     cur.update(disk=label, since=int(time.time()))

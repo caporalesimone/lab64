@@ -6,7 +6,7 @@
 #   lab64 build [args]         C64_BUILD of lab64.env (a host command, e.g. ./build.sh) or the default build (in lab64-tools)
 #   lab64 test [--view|--no-view] [--emu] [args]   C64_TEST of lab64.env or the Lab64 test engine:
 #                              [smoke|sanity|regression|all] [-k ID] [--list] (exit 2: bad arguments or no test selected).
-#                              --view: on the viewer screen (default when the viewer runs), --no-view: never; --emu: vc64web up
+#                              --view: on the viewer screen (turns the remote screen on; default when it is already on), --no-view: never; --emu: vc64web up
 #                              for this run (stopped after, if it was off) and C64_EMU=1; with C64_TEST only C64_EMU=1 (the
 #                              project command starts vc64web itself, e.g. lab64 up vc64web)
 #   lab64 manual [args]        the instruction manuals (PDF, in lab64-pdf-gen): C64_MANUAL of lab64.env or the default one
@@ -17,18 +17,21 @@
 #                              viewer + player; or only the services named (tools, vc64web, viewer)
 #   lab64 down [service...]    stop the stack, or the services named          lab64 ps   what runs
 #   lab64 view | stop          the viewer on http://localhost:6080 (and its player) | stop it
+#   lab64 screen [on|off|status]   the remote screen of the viewer (live window, VICE live): OFF at start, it costs CPU; VIEW_SCREEN=on
+#                              starts it with the viewer; the switch in the page does the same
+#   lab64 vice [--size WxH] [--bare|file|version]   VICE with sound on the viewer screen (turns it on): lab64 vice --help
 #   lab64 play <command>       a command in lab64-tools on the viewer screen with audio (e.g. lab64 play x64sc)
 #   lab64 page [FOLDER]        only the portable vc64web page, one HTML file with the emulator and all the ROMs (default out/work/vc64web/)
 #   lab64 clean [--keep-release-only] [--dry-run]   deletes what a build can recreate in out/: out/work and out/tmp (default), or
 #                              everything but out/releases (--keep-release-only: also out/cache); --dry-run only lists. Never touches sources
 #   lab64 images [--force] [names]   build the images        lab64 check-env   check the host        lab64 version
 #   lab64 upgrade              git pull of Lab64, then the missing images      lab64 install [DIR]   link this command in DIR
-# Inside the Lab64 containers the same "lab64" command exists for the container part (init, build, publish, test, manual, map):
+# Inside the Lab64 containers the same "lab64" command exists for the container part (init, build, publish, test, manual, map, vice, vice-env):
 # project scripts that run there call it directly (e.g. "lab64 map" at the end of a build step).
 # Commands run inside the containers get: project at /work (current folder), Lab64 at /lab64 (read-only, LAB64=/lab64), the Lab64
 # Python library importable (vicemon, c64test, c64manual, c64publish, psid). Nested calls use this same Lab64.
 # Services (docker/compose.yaml, Docker Compose v2): one project at a time; lab64 up for another project asks to stop the first.
-# Viewer settings (lab64.env or environment): VIEW_PORT (6080), VIEW_PASSWORD, VIEW_HOSTS, VIEW_SIZE.
+# Viewer settings (lab64.env or environment): VIEW_PORT (6080), VIEW_PASSWORD, VIEW_HOSTS, VIEW_SIZE, VIEW_SCREEN (off|on).
 # --- end of usage
 set -eu
 TC=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
@@ -44,9 +47,14 @@ emu() {                                # vc64web running (lab64 up): the tests r
         export EMU_URL=http://lab64-vc64web:7064 C64_DOCKER_ARGS="${C64_DOCKER_ARGS:-} --network lab64"
     fi
 }
-view() {                               # C64_VIEW=1: the container draws on the viewer screen and plays on its audio
+screen_ctl() {                         # (1.12) the remote screen of the viewer: on | off | status (answers on / off)
+    docker exec lab64-viewer node /opt/viewer/screenctl.js "$1"
+}
+screen_is_on() { running lab64-viewer && [ "$(screen_ctl status 2>/dev/null)" = on ]; }
+view() {                               # C64_VIEW=1: the container draws on the viewer screen and plays on its audio (the screen is turned on)
     if [ "${C64_VIEW:-}" = 1 ]; then
         running lab64-viewer || compose_up viewer >/dev/null      # errors still reach stderr
+        screen_ctl on >/dev/null || { echo "lab64: the remote screen of the viewer did not start" >&2; exit 1; }
         export DISPLAY=:99 PULSE_SERVER=unix:/tmp/.X11-unix/pulse C64_DOCKER_ARGS="${C64_DOCKER_ARGS:-} -v lab64-x11:/tmp/.X11-unix"
     fi
 }
@@ -55,7 +63,7 @@ dc() {                                 # docker compose on the Lab64 stack, with
     # lab64.env is sourced without export: every variable used by compose.yaml is passed here explicitly
     LAB64_DIR=$TC LAB64_PROJECT=$ROOT LAB64_VER=$VER LAB64_UID=$(id -u) LAB64_GID=$(id -g) \
         C64_VIEW_DISK="${C64_VIEW_DISK:-}" C64_VIEW_TITLE="${C64_VIEW_TITLE:-}" C64_VIEW_PLAYER="${C64_VIEW_PLAYER:-}" \
-        VIEW_PORT="${VIEW_PORT:-}" VIEW_PASSWORD="${VIEW_PASSWORD:-}" VIEW_HOSTS="${VIEW_HOSTS:-}" VIEW_SIZE="${VIEW_SIZE:-}" \
+        VIEW_SCREEN="${VIEW_SCREEN:-}" VIEW_PORT="${VIEW_PORT:-}" VIEW_PASSWORD="${VIEW_PASSWORD:-}" VIEW_HOSTS="${VIEW_HOSTS:-}" VIEW_SIZE="${VIEW_SIZE:-}" \
         docker compose -f "$TC/docker/compose.yaml" "$@"
 }
 compose_up() {                         # compose_up SERVICE...: images, network, volume, other project check, start
@@ -100,7 +108,7 @@ test)
         case $x in --view) export C64_VIEW=1 ;; --no-view) export C64_VIEW=0 ;; --emu) EMU=1; export C64_EMU=1 ;; *) set -- "$@" "$x" ;; esac
     done
     if [ -n "${C64_TEST:-}" ]; then cd "$ROOT"; exec sh -c "$C64_TEST \"\$@\"" lab64 "$@"; fi
-    [ -z "${C64_VIEW:-}" ] && running lab64-viewer && export C64_VIEW=1
+    [ -z "${C64_VIEW:-}" ] && screen_is_on && export C64_VIEW=1      # (1.12) on the viewer screen only when the remote screen is on
     if [ $EMU = 1 ] && ! running lab64-vc64web; then
         compose_up vc64web >/dev/null; emu; view; "$TC/build-scripts/build-images.sh" tools
         rc=0; "$TC/cli/run.sh" tools lab64 test "$@" || rc=$?
@@ -126,6 +134,15 @@ down)
     fi ;;
 stop)  dc rm -sf viewer player >/dev/null 2>&1 || true; echo "viewer stopped" ;;
 ps)    dc ps ;;
+screen)                                # (1.12) remote screen of the viewer: off at start (it costs CPU), on only when the user asks
+    case "${1:-}" in
+        on)  running lab64-viewer || compose_up viewer >/dev/null; screen_ctl on ;;
+        off) running lab64-viewer && screen_ctl off || echo off ;;
+        status|"") if running lab64-viewer; then screen_ctl status; else echo "viewer not running"; fi ;;
+        *) echo "lab64 screen [on|off|status]"; exit 1 ;;
+    esac ;;
+vice)                                  # (1.12) VICE with sound on the viewer screen (turns the remote screen on): lab64 vice --help
+    export C64_VIEW=1; view; "$TC/build-scripts/build-images.sh" tools; exec "$TC/cli/run.sh" tools lab64 vice "$@" ;;
 play)
     [ $# -ge 1 ] || { echo "lab64 play <command>"; exit 1; }
     export C64_VIEW=1; view; "$TC/build-scripts/build-images.sh" tools; exec "$TC/cli/run.sh" tools "$@" ;;
